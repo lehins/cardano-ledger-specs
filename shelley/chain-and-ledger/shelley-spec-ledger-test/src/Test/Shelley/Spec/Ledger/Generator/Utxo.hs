@@ -100,6 +100,8 @@ import Test.Shelley.Spec.Ledger.Generator.Constants (Constants (..), defaultCons
 import Test.Shelley.Spec.Ledger.Generator.Core
   ( GenEnv (..),
     KeySpace (..),
+    ScriptSpace(..),
+    ScriptInfo,
     findPayKeyPairAddr,
     findPayKeyPairCred,
     findPayScriptFromAddr,
@@ -112,7 +114,6 @@ import Test.Shelley.Spec.Ledger.Generator.Update (genUpdate)
 import Test.Shelley.Spec.Ledger.Utils (Split (..))
 import Cardano.Ledger.Era(Era)
 import NoThunks.Class()  -- Instances only
-
 
 -- =======================================================
 
@@ -140,6 +141,16 @@ showBalance
          ++ show (produced @era pparams stakepools txBody)
     where txBody = getField @"body" tx
 
+-- ==========================================================
+
+isKeyHashAddr :: Addr crypto -> Bool
+isKeyHashAddr (AddrBootstrap _) = True
+isKeyHashAddr (Addr _ (KeyHashObj _) _) = True
+isKeyHashAddr _ = False
+
+vKeyLocked :: (HasField "address" (Core.TxOut era) (Addr (Crypto era))) =>
+              Proxy era -> Core.TxOut era -> Bool
+vKeyLocked Proxy txout = isKeyHashAddr (getField @"address" txout)
 
 --  ========================================================================
 
@@ -188,6 +199,8 @@ genTx
              ksIndexedPayScripts,
              ksIndexedStakeScripts
            }
+         _dataspace
+         scriptspace
          constants
        )
   (LedgerEnv slot txIx pparams reserves)
@@ -225,9 +238,9 @@ genTx
       -------------------------------------------------------------------------
       let txWits = spendWits ++ wdrlWits ++ certWits ++ updateWits
           scripts = mkScriptWits @era spendScripts (certScripts ++ wdrlScripts)
-          mkTxWits' =
-            mkTxWits @era ksIndexedPaymentKeys ksIndexedStakingKeys txWits scripts
-              . hashAnnotated
+          mkTxWits' txbody =
+            mkTxWits @era (utxo,txbody,ssHash scriptspace)  ksIndexedPaymentKeys
+                     ksIndexedStakingKeys txWits scripts (hashAnnotated txbody)
       -------------------------------------------------------------------------
       -- SpendingBalance, Output Addresses (including some Pointer addresses)
       -- and a Outputs builder that distributes the given balance over
@@ -282,6 +295,7 @@ genTx
           scripts' = Map.fromList $ map (\s -> (hashScript @era s, s)) additionalScripts
       -- We add now repeatedly add inputs until the process converges.
       converge
+        (ssHash scriptspace)
         remainderCoin
         txWits
         (scripts `Map.union` scripts')
@@ -291,6 +305,7 @@ genTx
         pparams
         keySpace
         draftTx
+
 
 -- | - Collect additional inputs (and witnesses and keys and scripts) to make
 -- the transaction balance.
@@ -302,6 +317,11 @@ data Delta era = Delta
     deltaVKeys :: [KeyPair 'Witness (Crypto era)],
     deltaScripts :: [(Core.Script era, Core.Script era)]
   }
+
+instance Show (Delta era) where
+  show (Delta fee is _wit _change dvs ds) =
+    "(Delta"++show fee++" "++show(Set.size is)++" wit change "++show(length dvs)++" "++show(length ds)++")"
+
 
 -- | - We need this instance to know when delta has stopped growing. We don't
 --  actually need to compare all the fields, because if the extraInputs has not
@@ -348,13 +368,16 @@ genNextDelta ::
     Mock (Crypto era),
     HasField "inputs" (Core.TxBody era) (Set (TxIn (Crypto era)))
   ) =>
+  ScriptInfo era ->
   UTxO era ->
   Core.PParams era ->
   KeySpace era ->
   Core.Tx era ->
+  Int ->
   Delta era ->
   Gen (Delta era)
 genNextDelta
+  scriptinfo
   utxo
   pparams
   KeySpace_
@@ -363,8 +386,9 @@ genNextDelta
       ksIndexedPayScripts
     }
   tx
+  _count -- the counter of the fix loop
   delta@(Delta dfees extraInputs extraWitnesses change _ _) =
-    let baseTxFee = minfee pparams tx
+    let !baseTxFee = minfee pparams tx
         encodedLen x = fromIntegral $ BSL.length (serialize x)
         -- based on the current contents of delta, how much will the fee
         -- increase when we add the delta to the tx?
@@ -373,26 +397,25 @@ genNextDelta
             [ 5 :: Integer,  -- safety net in case the coin or a list prefix rolls over into a larger encoding
               -- Fudge factor, Sometimes we need extra buffer when minting tokens.
               -- 20 has been empirically determined to make non failing Txs
-              20 :: Integer,
+              20:: Integer,
               encodedLen (max dfees (Coin 0)) - 1,
               foldr (\a b -> b + encodedLen a) 0 extraInputs,
               encodedLen change,
               encodedLen extraWitnesses
             ]
-        deltaFee = draftSize <×> Coin (fromIntegral (getField @"_minfeeA" pparams))
+        deltaFee = (draftSize * 120) <×> Coin (fromIntegral (getField @"_minfeeA" pparams))
                    <+> Coin (fromIntegral (getField @"_minfeeB" pparams))  -- This is usually very small, so might not have much effect.
         totalFee = baseTxFee <+> deltaFee :: Coin
         remainingFee = totalFee <-> dfees :: Coin
         changeAmount = getChangeAmount change
         minAda = getField @"_minUTxOValue" pparams
      in if remainingFee <= Coin 0 -- we've paid for all the fees
-          then pure delta -- we're done
+          then (pure delta) -- we're done
           else -- the change covers what we need, so shift Coin from change to dfees.
 
             if remainingFee <= (changeAmount <-> minAda)
               then
-                pure $
-                  delta
+                pure $ delta
                     { dfees = totalFee,
                       change =
                         deltaChange
@@ -407,6 +430,7 @@ genNextDelta
                       -- Remove possible inputs from Utxo, if they already
                       -- appear in inputs.
                       UTxO $
+                        Map.filter (vKeyLocked (Proxy @ era)) $ -- filter them out if they are not Keylocked
                         Map.withoutKeys
                           (unUTxO utxo)
                           (getField @"inputs" txBody <> extraInputs)
@@ -426,13 +450,13 @@ genNextDelta
 
                 let newWits =
                       mkTxWits @era
+                        (utxo, txBody, scriptinfo)
                         ksIndexedPaymentKeys
                         ksIndexedStakingKeys
                         vkeyPairs
                         (mkScriptWits @era msigPairs mempty)
                         (hashAnnotated txBody)
-                pure $
-                  delta
+                pure $ delta
                     { extraWitnesses = extraWitnesses <> newWits,
                       extraInputs = extraInputs <> Set.fromList inputs,
                       change = deltaChange (<+> value) change, -- <+> is plus of the Val class
@@ -460,6 +484,7 @@ genNextDeltaTilFixPoint ::
     Mock (Crypto era),
     HasField "inputs" (Core.TxBody era) (Set (TxIn (Crypto era)))
   ) =>
+  ScriptInfo era ->
   Coin ->
   KeyPairs (Crypto era) ->
   [(Core.Script era, Core.Script era)] ->
@@ -468,10 +493,10 @@ genNextDeltaTilFixPoint ::
   KeySpace era ->
   Core.Tx era ->
   Gen (Delta era)
-genNextDeltaTilFixPoint initialfee keys scripts utxo pparams keySpace tx = do
+genNextDeltaTilFixPoint scriptinfo initialfee keys scripts utxo pparams keySpace tx = do
   addr <- genRecipients @era 1 keys scripts
-  fix
-    (genNextDelta utxo pparams keySpace tx)
+  fix 0
+    (genNextDelta scriptinfo utxo pparams keySpace tx)
     (deltaZero initialfee (safetyOffset <+> getField @"_minUTxOValue" pparams) (head addr))
   where
     -- add a small offset here to ensure outputs above minUtxo value
@@ -480,9 +505,11 @@ genNextDeltaTilFixPoint initialfee keys scripts utxo pparams keySpace tx = do
 applyDelta ::
   forall era.
   ( EraGen era,
-    Mock (Crypto era),
-    HasField "inputs" (Core.TxBody era) (Set (TxIn (Crypto era)))
+    Mock (Crypto era)
   ) =>
+  UTxO era ->
+  ScriptInfo era ->
+  Core.PParams era ->
   [KeyPair 'Witness (Crypto era)] ->
   Map (ScriptHash (Crypto era)) (Core.Script era) ->
   KeySpace era ->
@@ -490,34 +517,48 @@ applyDelta ::
   Delta era ->
   Core.Tx era
 applyDelta
+  utxo
+  scriptinfo
+  pparams
   neededKeys
   neededScripts
   KeySpace_ {ksIndexedPaymentKeys, ksIndexedStakingKeys}
-  tx
+  tx@(Tx _ _ _auxdata)
   (Delta deltafees extraIn _extraWits change extraKeys extraScripts) =
     --fix up the witnesses here?
     -- Adds extraInputs, extraWitnesses, and change from delta to tx
     let txBody = getField @"body" tx
-        outputs' = (getField @"outputs" txBody) StrictSeq.|> change
+        oldWitnessSet =
+          mkTxWits @era
+            (utxo,addInputs @era txBody extraIn,scriptinfo)
+            ksIndexedPaymentKeys
+            ksIndexedStakingKeys
+            kw
+            sw
+            (hashAnnotated txBody)
         body2 =
           (updateEraTxBody @era)
+            pparams
+            oldWitnessSet
             txBody
-            deltafees
-            (getField @"inputs" txBody <> extraIn)
-            outputs'
+            deltafees -- Override the existing fee
+            extraIn   -- Union with existing inputs
+            change    -- Append to end of the existing outputs
         kw = neededKeys <> extraKeys
         sw = neededScripts <> mkScriptWits @era extraScripts mempty
         newWitnessSet =
           mkTxWits @era
+            (utxo,body2,scriptinfo)
             ksIndexedPaymentKeys
             ksIndexedStakingKeys
             kw
             sw
             (hashAnnotated body2)
-     in tx {body = body2, wits = newWitnessSet}
+     in -- updateEraTx utxo scriptinfo tx body2 newWitnessSet
+        Tx @era body2 newWitnessSet _auxdata
 
-fix :: (Eq d, Monad m) => (d -> m d) -> d -> m d
-fix f d = do d1 <- f d; if d1 == d then pure d else fix f d1
+fix :: (Eq d, Monad m) => Int -> (Int -> d -> m d) -> d -> m d
+fix n f d = do d1 <- f n d; if d1 == d then pure d else fix (n+1) f d1
 
 converge ::
   ( EraGen era,
@@ -525,6 +566,7 @@ converge ::
     Mock (Crypto era),
     HasField "inputs" (Core.TxBody era) (Set (TxIn (Crypto era)))
   ) =>
+  ScriptInfo era ->
   Coin ->
   [KeyPair 'Witness (Crypto era)] ->
   Map (ScriptHash (Crypto era)) (Core.Script era) ->
@@ -536,6 +578,7 @@ converge ::
   Core.Tx era ->
   Gen (Core.Tx era)
 converge
+  scriptinfo
   initialfee
   neededKeys
   neededScripts
@@ -545,8 +588,8 @@ converge
   pparams
   keySpace
   tx = do
-    delta <- genNextDeltaTilFixPoint initialfee keys scripts utxo pparams keySpace tx
-    pure (applyDelta neededKeys neededScripts keySpace tx delta)
+    delta <- genNextDeltaTilFixPoint scriptinfo initialfee keys scripts utxo pparams keySpace tx
+    pure (applyDelta utxo scriptinfo pparams neededKeys neededScripts keySpace tx delta)
 
 -- | Return up to /k/ random elements from /items/
 -- (instead of the less efficient /take k <$> QC.shuffle items/)
@@ -600,6 +643,7 @@ mkTxWits ::
   ( EraGen era,
     Mock (Crypto era)
   ) =>
+  (UTxO era, Core.TxBody era, ScriptInfo era) ->
   Map (KeyHash 'Payment (Crypto era)) (KeyPair 'Payment (Crypto era)) ->
   Map (KeyHash 'Staking (Crypto era)) (KeyPair 'Staking (Crypto era)) ->
   [KeyPair 'Witness (Crypto era)] ->
@@ -607,12 +651,14 @@ mkTxWits ::
   SafeHash (Crypto era) EraIndependentTxBody ->
   Core.Witnesses era
 mkTxWits
+  (utxo,txbody,scriptinfo)
   indexedPaymentKeys
   indexedStakingKeys
   awits
   msigs
   txBodyHash =
      genEraWitnesses @era
+        (utxo,txbody,scriptinfo)
         (makeWitnessesVKey txBodyHash awits
             `Set.union` makeWitnessesFromScriptKeys
               txBodyHash
