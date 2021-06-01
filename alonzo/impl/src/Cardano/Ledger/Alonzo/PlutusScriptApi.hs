@@ -266,7 +266,6 @@ scriptsNeeded ::
   [(ScriptPurpose (Crypto era), ScriptHash (Crypto era))]
 scriptsNeeded utxo tx = scriptsNeededFromBody utxo (getField @"body" tx)
 
-
 -- We only find certificate witnesses in Delegating and Deregistration DCerts
 -- that have ScriptHashObj credentials.
 addOnlyCwitness ::

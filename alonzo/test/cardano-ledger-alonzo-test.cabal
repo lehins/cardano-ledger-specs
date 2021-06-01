@@ -49,6 +49,7 @@ library
     containers,
     hashable,
     plutus-tx,
+    plutus-ledger-api,
     QuickCheck,
     shelley-spec-ledger-test,
     shelley-spec-ledger,

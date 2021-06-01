@@ -41,26 +41,35 @@ module Test.Cardano.Ledger.Alonzo.Trials
     theutxo,
     alls,
     d1,
-    d2,d3,d4,
+    d2,
+    d3,
+    d4,
   )
 where
 
 import Cardano.Ledger.Allegra (AllegraEra)
 import Cardano.Ledger.Alonzo (AlonzoEra)
+-- import Shelley.Spec.Ledger.UTxO(UTxO(..))
+
+import Cardano.Ledger.Alonzo.Data (Data (..))
 import Cardano.Ledger.Alonzo.PParams (PParams' (..))
 import Cardano.Ledger.Alonzo.Rules.Bbody (AlonzoBBODY)
 import Cardano.Ledger.Alonzo.Rules.Utxow (AlonzoUTXOW)
 import Cardano.Ledger.Alonzo.Scripts (ppScript)
+import Cardano.Ledger.Alonzo.TxBody ()
 import Cardano.Ledger.Coin (Coin (..))
 import qualified Cardano.Ledger.Core as Core
 import Cardano.Ledger.Era (Era (Crypto))
-import Cardano.Ledger.Pretty (PDoc, PrettyA(..))
+import Cardano.Ledger.Hashes (EraIndependentData)
+import Cardano.Ledger.Pretty (PDoc, PrettyA (..))
+import Cardano.Ledger.SafeHash (SafeHash, hashAnnotated)
 import Cardano.Ledger.Shelley (ShelleyEra)
 import Cardano.Slotting.Slot (SlotNo (..))
 import Control.State.Transition.Extended (Embed (..), IRC (..), STS (..))
 import Data.Default.Class (Default (def))
 import qualified Data.Map as Map
 import Data.Proxy (Proxy (..))
+import qualified PlutusTx as P (Data (..))
 import Shelley.Spec.Ledger.BlockChain (Block)
 import Shelley.Spec.Ledger.LedgerState
   ( AccountState (..),
@@ -75,14 +84,13 @@ import Shelley.Spec.Ledger.LedgerState
 import Shelley.Spec.Ledger.PParams (PParams' (..))
 import Shelley.Spec.Ledger.STS.Chain (CHAIN, ChainPredicateFailure (..), ChainState (..))
 import Shelley.Spec.Ledger.STS.Ledger (LEDGER, LedgerEnv (..), LedgerPredicateFailure (UtxowFailure))
--- import Shelley.Spec.Ledger.UTxO(UTxO(..))
 import System.Timeout
 import Test.Cardano.Ledger.Alonzo.AlonzoEraGen ()
 import Test.Cardano.Ledger.EraBuffet (TestCrypto)
 import Test.Shelley.Spec.Ledger.Generator.Block (genBlock)
 import Test.Shelley.Spec.Ledger.Generator.Constants (Constants (..))
-import Test.Shelley.Spec.Ledger.Generator.Core (GenEnv (..), KeySpace (..), DataSpace(..), ScriptSpace(..), hashData)
-import Test.Shelley.Spec.Ledger.Generator.EraGen (EraGen (..), genUtxo0, allScripts)
+import Test.Shelley.Spec.Ledger.Generator.Core (DataSpace (..), GenEnv (..), KeySpace (..), ScriptSpace (..), hashData)
+import Test.Shelley.Spec.Ledger.Generator.EraGen (EraGen (..), allScripts, genUtxo0)
 import Test.Shelley.Spec.Ledger.Generator.Presets (genEnv)
 import Test.Shelley.Spec.Ledger.Generator.ShelleyEraGen ()
 import Test.Shelley.Spec.Ledger.Generator.Trace.Chain (mkGenesisChainState)
@@ -103,15 +111,8 @@ import Test.Shelley.Spec.Ledger.PropertyTests
     relevantCasesAreCovered,
     removedAfterPoolreap,
   )
-import Cardano.Ledger.Alonzo.TxBody()
 import Test.Tasty
 import Test.Tasty.QuickCheck
-
-import Cardano.Ledger.Alonzo.Data(Data(..))
-import qualified PlutusTx as P (Data (..))
-import Cardano.Ledger.SafeHash(SafeHash, hashAnnotated)
-import Cardano.Ledger.Hashes(EraIndependentData)
-
 
 -- ======================================================================
 -- These instances are needed to make property tests in the Alonzo era
@@ -212,11 +213,12 @@ stakescript :: Int -> (String, PDoc)
 stakescript n = (\(x, (y, _z)) -> (show x, ppScript y)) ((Map.toList (ksIndexedStakeScripts keys)) !! n)
 
 theutxo :: IO ()
-theutxo = do utx <- generate (genUtxo0 genenv0)
-             putStrLn(show(prettyA utx))
+theutxo = do
+  utx <- generate (genUtxo0 genenv0)
+  putStrLn (show (prettyA utx))
 
-alls :: [(PDoc,PDoc)]
-alls =  (\(x, y) -> (ppScript x, ppScript y)) <$> (allScripts @(AlonzoEra TestCrypto) _constants)
+alls :: [(PDoc, PDoc)]
+alls = (\(x, y) -> (ppScript x, ppScript y)) <$> (allScripts @(AlonzoEra TestCrypto) _constants)
 
 d1 :: P.Data
 d1 = P.I 4
@@ -270,7 +272,6 @@ go2 :: IO ()
 go2 =
   defaultMain
     ( localOption
-        (QuickCheckReplay (Just 213590 ))
+        (QuickCheckReplay (Just 213590))
         (testProperty "Chain and Ledger traces cover the relevant cases" (withMaxSuccess 50 (relevantCasesAreCovered @(AlonzoEra TestCrypto))))
-
     )

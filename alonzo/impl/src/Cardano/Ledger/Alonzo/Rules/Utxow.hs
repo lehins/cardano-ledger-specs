@@ -17,6 +17,7 @@ module Cardano.Ledger.Alonzo.Rules.Utxow where
 
 import Cardano.Binary (FromCBOR (..), ToCBOR (..))
 import Cardano.Ledger.Alonzo.Data (DataHash)
+import Cardano.Ledger.Alonzo.Language (Language (..))
 import Cardano.Ledger.Alonzo.PParams (PParams)
 import Cardano.Ledger.Alonzo.PlutusScriptApi
   ( checkScriptData,
@@ -87,7 +88,6 @@ import Shelley.Spec.Ledger.TxBody
     unWdrl,
   )
 import Shelley.Spec.Ledger.UTxO (UTxO, txinLookup)
-import Cardano.Ledger.Alonzo.Language (Language (..))
 
 -- =====================================================
 
@@ -188,10 +188,9 @@ decodePredFail n = Invalid n
 -- | given the "txscripts" field of the Witnesses, compute the set of languages used in a transaction
 langsUsed :: forall era. (Core.Script era ~ Script era, ValidateScript era) => Map.Map (ScriptHash (Crypto era)) (Script era) -> Set Language
 langsUsed hashScriptMap =
-    Set.fromList [ l | (_hash, script) <- Map.toList hashScriptMap
-                     , (not . isNativeScript @era) script
-                     , Just l <- [language  @era script] ]
-
+  Set.fromList
+    [ l | (_hash, script) <- Map.toList hashScriptMap, (not . isNativeScript @era) script, Just l <- [language @era script]
+    ]
 
 {- Defined in the Shelley Utxow rule.
 type ShelleyStyleWitnessNeeds era =
