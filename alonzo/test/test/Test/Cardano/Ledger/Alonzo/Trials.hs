@@ -33,6 +33,7 @@ module Test.Cardano.Ledger.Alonzo.Trials
     removedAfterPoolreap,
     go,
     go2,
+    go3,
     payscript,
     stakescript,
     scripts,
@@ -47,7 +48,7 @@ module Test.Cardano.Ledger.Alonzo.Trials
   )
 where
 
-import Cardano.Ledger.Allegra (AllegraEra)
+-- import Cardano.Ledger.Allegra (AllegraEra)
 import Cardano.Ledger.Alonzo (AlonzoEra)
 -- import Shelley.Spec.Ledger.UTxO(UTxO(..))
 
@@ -248,7 +249,7 @@ fastPropertyTests :: TestTree
 fastPropertyTests =
   testGroup
     "Fast Alonzo Property Tests"
-    [ testProperty "Chain and Ledger traces cover the relevant cases" (withMaxSuccess 50 (relevantCasesAreCovered @(AlonzoEra TestCrypto))),
+    [ testProperty "Chain and Ledger traces cover the relevant cases" (withMaxSuccess 10 (relevantCasesAreCovered @(AlonzoEra TestCrypto))),
       testProperty "total amount of Ada is preserved (Chain)" (withMaxSuccess 50 (adaPreservationChain @(AlonzoEra TestCrypto)))
     ]
 
@@ -263,8 +264,8 @@ go n =
       ( localOption
           -- (QuickCheckReplay (Just 117392)) -- after 206 tests
           (QuickCheckReplay (Just n))
-          (testProperty "preserves ADA" $ adaPreservationChain @(AllegraEra TestCrypto))
-          -- (propertyTests  @(AlonzoEra TestCrypto))
+          -- (testProperty "preserves ADA" $ adaPreservationChain @(AllegraEra TestCrypto))
+          (propertyTests @(AlonzoEra TestCrypto))
           -- (testProperty "Delegation Properties" (delegProperties @(AlonzoEra TestCrypto)))
       )
 
@@ -274,4 +275,15 @@ go2 =
     ( localOption
         (QuickCheckReplay (Just 213590))
         (testProperty "Chain and Ledger traces cover the relevant cases" (withMaxSuccess 50 (relevantCasesAreCovered @(AlonzoEra TestCrypto))))
+    )
+
+go3 :: Int -> IO ()
+go3 n =
+  defaultMain
+    ( localOption
+        (QuickCheckReplay (Just n))
+        -- (testProperty "preserves ADA" $   (withMaxSuccess 100 (adaPreservationChain @(AllegraEra TestCrypto))))
+        -- (propertyTests  @(AlonzoEra TestCrypto))
+        -- (testProperty "Delegation Properties"  (withMaxSuccess 15 (delegProperties @(AlonzoEra TestCrypto))))
+        fastPropertyTests
     )

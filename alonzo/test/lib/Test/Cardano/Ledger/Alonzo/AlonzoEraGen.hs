@@ -46,7 +46,7 @@ import Cardano.Ledger.Tx (Tx (Tx))
 import Cardano.Ledger.Val ((<+>), (<×>))
 import Cardano.Slotting.Slot (SlotNo (..))
 import Control.Monad (replicateM)
-import Data.Hashable (hash)
+import Data.Hashable (Hashable (..))
 import qualified Data.List as List
 import Data.Map as Map
 import Data.Maybe (fromJust)
@@ -54,6 +54,7 @@ import Data.Proxy (Proxy (..))
 import Data.Sequence.Strict (StrictSeq ((:|>)))
 import qualified Data.Sequence.Strict as Seq (fromList)
 import Data.Set as Set
+import Data.Word (Word64)
 import Debug.Trace (trace)
 import GHC.Records (HasField (..))
 import Plutus.V1.Ledger.Api (defaultCekCostModelParams)
@@ -63,6 +64,7 @@ import Shelley.Spec.Ledger.Address (Addr (..))
 import Shelley.Spec.Ledger.Credential (Credential (..))
 import Shelley.Spec.Ledger.PParams (Update)
 import Shelley.Spec.Ledger.TxBody (DCert, TxIn, Wdrl)
+import Shelley.Spec.Ledger.UTxO (UTxO (..))
 import Test.Cardano.Ledger.AllegraEraGen (genValidityInterval)
 import Test.Cardano.Ledger.MaryEraGen (addTokens, genMint, maryGenesisValue, policyIndex)
 import Test.QuickCheck hiding ((><))
@@ -80,9 +82,13 @@ import Test.Shelley.Spec.Ledger.Generator.EraGen (EraGen (..), MinGenTxout (..))
 import Test.Shelley.Spec.Ledger.Generator.ScriptClass (Quantifier (..), ScriptClass (..))
 import Test.Shelley.Spec.Ledger.Generator.Update (genM, genShelleyPParamsDelta)
 import qualified Test.Shelley.Spec.Ledger.Generator.Update as Shelley (genPParams)
+import Test.Shelley.Spec.Ledger.Generator.Utxo (vKeyLocked)
 
 ptrace :: PrettyA t => [Char] -> t -> a -> a
 ptrace x y z = trace ("\n" ++ show (prettyA y) ++ "\n" ++ show x) z
+
+occaisionally :: Hashable a => a -> Int -> String -> String
+occaisionally x n s = if mod (hash x) n == 0 then trace s s else s
 
 -- ================================================================
 
@@ -146,10 +152,17 @@ unTime :: Alonzo.Script era -> Timelock (Crypto era)
 unTime (TimelockScript x) = x
 unTime (PlutusScript _) = error "Plutus in Timelock"
 
+okAsCollateral :: forall c. Mock c => UTxO (AlonzoEra c) -> TxIn c -> Bool
+okAsCollateral utxo inputx =
+  case Map.lookup inputx (unUTxO utxo) of
+    Nothing -> False
+    Just outputx -> vKeyLocked (Proxy @(AlonzoEra c)) outputx
+
 genAlonzoTxBody ::
   forall c.
   Mock c =>
   GenEnv (AlonzoEra c) ->
+  UTxO (AlonzoEra c) ->
   Core.PParams (AlonzoEra c) ->
   SlotNo ->
   Set.Set (TxIn c) ->
@@ -160,21 +173,22 @@ genAlonzoTxBody ::
   StrictMaybe (Update (AlonzoEra c)) ->
   StrictMaybe (AuxiliaryDataHash c) ->
   Gen (TxBody (AlonzoEra c), [Core.Script (AlonzoEra c)])
-genAlonzoTxBody _genenv pparams currentslot input txOuts certs wdrls fee updates auxDHash = do
+genAlonzoTxBody _genenv utxo pparams currentslot input txOuts certs wdrls fee updates auxDHash = do
   _low <- genM (genSlotAfter currentslot)
   _high <- genM (genSlotAfter (currentslot + 50))
   netid <- genM $ pure Testnet -- frequency [(2, pure Mainnet), (1, pure Testnet)]
   minted <- genMint
-  let (minted2, txouts') = case addTokens (Proxy @(AlonzoEra c)) mempty pparams minted txOuts of
+  let (minted2, txouts2) = case addTokens (Proxy @(AlonzoEra c)) mempty pparams minted txOuts of
         Nothing -> (mempty, txOuts)
         Just os -> (minted, os)
       scriptsFromPolicies = List.map (\p -> (Map.!) policyIndex p) (Set.toList $ policies minted)
+      txouts3 = fmap addMaybeDataHashToTxOut txouts2
   validityInterval <- genValidityInterval currentslot
   return
     ( TxBody
         input
-        Set.empty -- collaeral -- TODO do something better here (use genenv ?)
-        txouts'
+        (Set.filter (okAsCollateral utxo) input) -- Set.empty -- collateral -- TODO do something better here (use genenv ?)
+        txouts3
         certs
         wdrls
         fee
@@ -205,14 +219,14 @@ genAlonzoPParamsDelta constants pp = do
   shelleypp <- genShelleyPParamsDelta @(MaryEra c) constants (Alonzo.retractPP (Coin 100) pp)
   ada <- genM (Coin <$> choose (1, 5))
   cost <- genM (pure (Map.singleton PlutusV1 freeCostModel)) -- TODO what is a better assumption for this?
-  price <- genM (Prices <$> (Coin <$> choose (100, 5000)) <*> (Coin <$> choose (100, 5000)))
-  mxTx <- genM (ExUnits <$> (choose (100, 5000)) <*> (choose (100, 5000)))
+  price <- genM (Prices <$> (Coin <$> choose (0, 2)) <*> (Coin <$> choose (0, 2)))
+  mxTx <- pure SNothing -- genM (ExUnits <$> (choose (100, 5000)) <*> (choose (100, 5000)))
   mxBl <- genM (ExUnits <$> (choose (100, 5000)) <*> (choose (100, 5000)))
   -- Not too small for mxV, if this is too small then any Tx with Value
   -- that has lots of policyIds will fail. The Shelley Era uses hard coded 4000
   mxV <- genM (genNatural 4000 5000)
-  let c = SJust 150
-      mxC = SJust 10
+  let c = SJust 25 -- percent of fee in collateral
+      mxC = SJust 100 -- max number of inputs in collateral
   pure (Alonzo.extendPP shelleypp ada cost price mxTx mxBl mxV c mxC)
 
 genAlonzoPParams ::
@@ -222,35 +236,39 @@ genAlonzoPParams ::
 genAlonzoPParams constants = do
   shelleypp <- Shelley.genPParams @(MaryEra c) constants -- This ensures that "_d" field is not 0.
   ada <- (Coin <$> choose (1, 5))
-  cost <- pure (Map.singleton PlutusV1 (CostModel Map.empty)) -- There are no other Languages, and there must be something for PlutusV1
-  price <- (Prices <$> (Coin <$> choose (100, 5000)) <*> (Coin <$> choose (100, 5000)))
-  mxTx <- (ExUnits <$> (choose (100, 5000)) <*> (choose (100, 5000)))
-  mxBl <- (ExUnits <$> (choose (100, 5000)) <*> (choose (100, 5000)))
+  cost <- pure (Map.singleton PlutusV1 freeCostModel) -- There are no other Languages, and there must be something for PlutusV1
+  price <- pure (Prices (Coin 0) (Coin 0)) -- (Prices <$> (Coin <$> choose (100, 5000)) <*> (Coin <$> choose (100, 5000)))
+  mxTx <- pure (ExUnits (5 * bigMem + 1) (5 * bigStep + 1)) -- (ExUnits <$> (choose (100, 5000)) <*> (choose (100, 5000)))
+  mxBl <- (ExUnits <$> (choose ((20 * bigMem + 1), (30 * bigMem + 1))) <*> choose ((20 * bigStep + 1), (30 * bigStep + 1)))
   mxV <- (genNatural 4000 10000) -- This can't be too small. Shelley uses Hard coded 4000
-  let c = 150
-      mxC = 10
+  let c = 25 -- percent of fee in collateral
+      mxC = 100 -- max number of inputs in collateral
   pure (Alonzo.extendPP shelleypp ada cost price mxTx mxBl mxV c mxC)
 
 -- | Since Alonzo PParams don't have this field, we have to compute something here.
 instance HasField "_minUTxOValue" (Alonzo.PParams (AlonzoEra c)) Coin where
   getField _ = Coin 4000
 
+bigStep, bigMem :: Word64
+bigStep = 999 -- 9999999990
+bigMem = 500 -- 50000000
+
 instance Mock c => EraGen (AlonzoEra c) where
   genEraAuxiliaryData = genAux
   genGenesisValue = maryGenesisValue
   genEraTwoPhaseScripts =
-    [ TwoPhaseInfo (alwaysSucceeds 3) (P.I 1) ("Spend", 1, P.I 1, 500, 3000),
-      TwoPhaseInfo (alwaysSucceeds 3) (P.I 2) ("Spend", 1, P.I 2, 500, 3000),
-      TwoPhaseInfo (alwaysSucceeds 3) (P.I 3) ("Spend", 1, P.I 3, 500, 3000),
-      TwoPhaseInfo (alwaysSucceeds 3) (P.I 4) ("Spend", 1, P.I 4, 500, 3000)
+    [ TwoPhaseInfo (alwaysSucceeds 3) (P.I 1) ("Spend", 1, P.I 1, bigMem, bigStep),
+      TwoPhaseInfo (alwaysSucceeds 3) (P.I 1) ("Spend", 1, P.I 1, bigMem, bigStep),
+      TwoPhaseInfo (alwaysSucceeds 3) (P.I 1) ("Spend", 1, P.I 1, bigMem, bigStep),
+      TwoPhaseInfo (alwaysSucceeds 3) (P.I 1) ("Spend", 1, P.I 1, bigMem, bigStep)
     ]
   genEraTxBody = genAlonzoTxBody
-  updateEraTxBody pp witnesses txb coinx txin txout = (trace (show (prettyA new)) new)
+  updateEraTxBody utxo pp witnesses txb coinx txin txout = new
     where
       new =
         txb
           { inputs = (inputs txb) <> txin,
-            collateral = (collateral txb) <> txin, -- In Alonzo, extra inputs also are added to collateral
+            collateral = (collateral txb) <> Set.filter (okAsCollateral utxo) txin, -- In Alonzo, extra inputs also are added to collateral
             txfee = coinx,
             outputs = (outputs txb) :|> txout,
             -- The witnesses may have changed, recompute the wpphash.
@@ -261,7 +279,7 @@ instance Mock c => EraGen (AlonzoEra c) where
 
   genEraPParamsDelta = genAlonzoPParamsDelta
   genEraPParams = genAlonzoPParams
-  genEraWitnesses (utxo, txbody, scriptinfo) setWitVKey mapScriptWit = (ptrace "Witness" new new)
+  genEraWitnesses (utxo, txbody, scriptinfo) setWitVKey mapScriptWit = new
     where
       new =
         TxWitness
@@ -327,7 +345,7 @@ getDataMap scriptinfo scrips = Map.foldlWithKey' accum Map.empty scrips
 
 instance Mock c => MinGenTxout (AlonzoEra c) where
   calcEraMinUTxO tout pp = (utxoEntrySize tout <×> getField @"_adaPerUTxOWord" pp)
-  addValToTxOut v (TxOut a u b) = TxOut a (v <+> u) b
+  addValToTxOut v (TxOut a u _b) = TxOut a (v <+> u) (dataFromAddr a) -- _b
   genEraTxOut genv genVal addrs = do
     values <- (replicateM (length addrs) genVal)
     let makeTxOut (addr@(Addr _network (ScriptHashObj shash) _stakeref)) val = TxOut addr val maybedatahash
@@ -335,6 +353,19 @@ instance Mock c => MinGenTxout (AlonzoEra c) where
             (_, maybedatahash) = findPlutus genv shash
         makeTxOut addr val = TxOut addr val SNothing
     pure (zipWith makeTxOut addrs values)
+
+-- | If an Address is script address, we can find a potential data hash for it from
+--   genEraTwoPhaseScripts, which contains all known plutus scripts in the tests set.
+-- If the script has is not in that map, then its data hash is SNothing.
+dataFromAddr :: forall c. Mock c => Addr c -> StrictMaybe (DataHash c)
+dataFromAddr (Addr _network (ScriptHashObj shash) _stakeref) =
+  case List.find (\info -> shash == hashScript @(AlonzoEra c) (getScript @(AlonzoEra c) info)) genEraTwoPhaseScripts of
+    Just info -> SJust (hashData @(AlonzoEra c) (getData info))
+    Nothing -> SNothing
+dataFromAddr _ = SNothing
+
+addMaybeDataHashToTxOut :: Mock c => TxOut (AlonzoEra c) -> TxOut (AlonzoEra c)
+addMaybeDataHashToTxOut (TxOut addr val _) = TxOut addr val (dataFromAddr addr)
 
 someLeaf ::
   forall era.

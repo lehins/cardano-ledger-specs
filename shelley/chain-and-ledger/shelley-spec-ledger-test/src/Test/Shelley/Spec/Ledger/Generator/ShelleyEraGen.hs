@@ -77,10 +77,10 @@ instance
         Constants {minGenesisOutputVal, maxGenesisOutputVal}
       ) =
       genCoin minGenesisOutputVal maxGenesisOutputVal
-  genEraTxBody _ge = genTxBody
+  genEraTxBody _ge _utxo = genTxBody
   genEraAuxiliaryData = genMetadata
 
-  updateEraTxBody _pp _wits body fee ins out =
+  updateEraTxBody _utxo _pp _wits body fee ins out =
     body
       { _txfee = fee,
         _inputs = (_inputs body) <> ins,

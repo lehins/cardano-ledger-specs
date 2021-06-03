@@ -17,6 +17,7 @@ module Test.Shelley.Spec.Ledger.Generator.Utxo
     Delta (..),
     showBalance,
     getNRandomPairs,
+    vKeyLocked,
   )
 where
 
@@ -114,6 +115,15 @@ import Test.Shelley.Spec.Ledger.Generator.Update (genUpdate)
 import Test.Shelley.Spec.Ledger.Utils (Split (..))
 import Cardano.Ledger.Era(Era)
 import NoThunks.Class()  -- Instances only
+import Cardano.Ledger.Val(adaOnly)
+
+import Debug.Trace(trace)
+
+{-
+import Data.Hashable(Hashable(..))
+occaisionally:: Hashable a => a -> Int -> String -> String
+occaisionally x n s = if mod (hash x) n == 0 then trace s s else s
+-}
 
 -- =======================================================
 
@@ -148,9 +158,13 @@ isKeyHashAddr (AddrBootstrap _) = True
 isKeyHashAddr (Addr _ (KeyHashObj _) _) = True
 isKeyHashAddr _ = False
 
-vKeyLocked :: (HasField "address" (Core.TxOut era) (Addr (Crypto era))) =>
+-- | We are choosing new TxOut to pay fees, We want only Key locked addresss with Ada only values.
+vKeyLocked :: (HasField "address" (Core.TxOut era) (Addr (Crypto era)),
+               HasField "value" (Core.TxOut era) (Core.Value era),
+               Val (Core.Value era) ) =>
               Proxy era -> Core.TxOut era -> Bool
-vKeyLocked Proxy txout = isKeyHashAddr (getField @"address" txout)
+vKeyLocked Proxy txout = isKeyHashAddr (getField @"address" txout) &&
+                         adaOnly (getField @"value" txout)
 
 --  ========================================================================
 
@@ -260,6 +274,8 @@ genTx
               -- generating a transaction. If we get unexplained failures one
               -- might investigate changing these constants.
 
+          -- !_ = occaisionally (length inputs * length ksKeyPairs * length ksMSigScripts) 10000 ("UTxOSize = "++show (Map.size (unUTxO utxo)))
+
       outputAddrs <-
         genRecipients @era (length inputs + n) ksKeyPairs ksMSigScripts
           >>= genPtrAddrs (_dstate dpState')
@@ -267,7 +283,7 @@ genTx
       -- Occasionally we have a transaction generated with insufficient inputs
       -- to cover the deposits. In this case we discard the test case.
       let enough = (length outputAddrs) <×> (getField @"_minUTxOValue" pparams)
-      !_ <- when (coin spendingBalance < coin enough) discard
+      !_ <- when (coin spendingBalance < coin enough) (trace ("Discard case 1\n   balance = "++show(coin spendingBalance)++"\n   "++show(coin enough)) discard)
 
       -------------------------------------------------------------------------
       -- Build a Draft Tx and repeatedly add to Delta until all fees are
@@ -282,6 +298,7 @@ genTx
       (draftTxBody, additionalScripts) <-
         genEraTxBody
           ge
+          utxo
           pparams
           slot
           (Set.fromList inputs)
@@ -397,13 +414,9 @@ genNextDelta
             [ 5 :: Integer,  -- safety net in case the coin or a list prefix rolls over into a larger encoding
               -- Fudge factor, Sometimes we need extra buffer when minting tokens.
               -- 20 has been empirically determined to make non failing Txs
-              20:: Integer,
-              encodedLen (max dfees (Coin 0)) - 1,
-              foldr (\a b -> b + encodedLen a) 0 extraInputs,
-              encodedLen change,
               encodedLen extraWitnesses
             ]
-        deltaFee = (draftSize * 120) <×> Coin (fromIntegral (getField @"_minfeeA" pparams))
+        deltaFee = (draftSize * 200) <×> Coin (fromIntegral (getField @"_minfeeA" pparams))
                    <+> Coin (fromIntegral (getField @"_minfeeB" pparams))  -- This is usually very small, so might not have much effect.
         totalFee = baseTxFee <+> deltaFee :: Coin
         remainingFee = totalFee <-> dfees :: Coin
@@ -446,7 +459,7 @@ genNextDelta
                 -- testing framework to generate almost-random transactions that aways succeed every time.
                 -- Experience suggests that this happens less than 1% of the time, and does not lead to backtracking.
 
-                !_ <- when (null inputs) discard
+                !_ <- when (null inputs) (trace ("Discard case 2 "++show(Map.size (unUTxO utxo'))++"  "++show(Map.size (unUTxO utxo))) discard)
 
                 let newWits =
                       mkTxWits @era
@@ -538,6 +551,7 @@ applyDelta
             (hashAnnotated txBody)
         body2 =
           (updateEraTxBody @era)
+            utxo
             pparams
             oldWitnessSet
             txBody
@@ -831,8 +845,17 @@ genRecipients len keys scripts = do
   -- expand size of UTxO
 
   -- choose m scripts and n keys as recipients
-  m <- QC.choose (0, n' - 1)
-  let n = n' - m
+  -- We want to choose more Keys than Scripts by a factor of 2 or more.
+  (m,n) <- case n' of
+             0 -> pure (0,0)
+             1 -> pure (0,1)
+             2 -> pure (0,2)
+             3 -> pure (1,2)
+             4 -> pure (1,3)
+             5 -> pure (2,3)
+             _ -> (do m <- QC.choose (0, n' - 4)
+                      let n = n' - m
+                      pure (m,n))
   recipientKeys <- ruffle n keys
   recipientScripts <- ruffle m scripts
 

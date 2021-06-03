@@ -87,7 +87,6 @@ test-suite cardano-ledger-alonzo-test
     flat,
     plutus-core,
     plutus-tx,
-    plutus-tx-plugin,
     plutus-ledger-api,
     QuickCheck,
     small-steps,

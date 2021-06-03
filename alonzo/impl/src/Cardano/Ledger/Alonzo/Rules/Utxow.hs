@@ -89,7 +89,7 @@ import Shelley.Spec.Ledger.TxBody
   )
 import Shelley.Spec.Ledger.UTxO (UTxO, txinLookup)
 
--- =====================================================
+-- ===================================================
 
 -- | The Predicate failure type in the Alonzo Era. It embeds the Predicate
 --   failure type of the Shelley Era, as they share some failure modes.
@@ -415,7 +415,8 @@ instance
     HasField "collateral" (Core.TxBody era) (Set (TxIn (Crypto era))),
     -- Supply the HasField and Validate instances for Alonzo
     ShelleyStyleWitnessNeeds era, -- supplies a subset of those needed. All the old Shelley Needs still apply.
-    AlonzoStyleAdditions era
+    AlonzoStyleAdditions era,
+    Show (Core.TxOut era)
   ) =>
   STS (AlonzoUTXOW era)
   where

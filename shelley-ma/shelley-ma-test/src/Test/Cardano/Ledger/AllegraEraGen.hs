@@ -89,9 +89,9 @@ instance (CryptoClass.Crypto c) => ScriptClass (AllegraEra c) where
 instance (CryptoClass.Crypto c, Mock c) => EraGen (AllegraEra c) where
   genGenesisValue (GenEnv _keySpace _dataspace _scriptspace Constants {minGenesisOutputVal, maxGenesisOutputVal}) =
     genCoin minGenesisOutputVal maxGenesisOutputVal
-  genEraTxBody _ge = genTxBody
+  genEraTxBody _ge _utxo = genTxBody
   genEraAuxiliaryData = genAuxiliaryData
-  updateEraTxBody _pp _wits (TxBody existingins outs cert wdrl _txfee vi upd ad forge) fee ins out =
+  updateEraTxBody _utxo _pp _wits (TxBody existingins outs cert wdrl _txfee vi upd ad forge) fee ins out =
     TxBody (existingins <> ins) (outs :|> out) cert wdrl fee vi upd ad forge
   genEraPParamsDelta = genShelleyPParamsDelta
   genEraPParams = genPParams

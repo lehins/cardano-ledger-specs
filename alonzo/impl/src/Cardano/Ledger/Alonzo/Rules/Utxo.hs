@@ -18,14 +18,12 @@ module Cardano.Ledger.Alonzo.Rules.Utxo where
 import Cardano.Binary (FromCBOR (..), ToCBOR (..), serialize)
 import Cardano.Ledger.Alonzo.Data (dataHashSize)
 import Cardano.Ledger.Alonzo.Rules.Utxos (UTXOS, UtxosPredicateFailure)
-import Cardano.Ledger.Alonzo.Scripts (ExUnits (..), Prices, pointWiseExUnits)
-import Cardano.Ledger.Alonzo.Tx
-  ( ValidatedTx (..),
-    minfee,
-  )
+import Cardano.Ledger.Alonzo.Scripts (ExUnits (..), Prices, Script, pointWiseExUnits)
+import Cardano.Ledger.Alonzo.Tx (ValidatedTx (..), minfee, ppTx)
 import qualified Cardano.Ledger.Alonzo.Tx as Alonzo (ValidatedTx)
 import Cardano.Ledger.Alonzo.TxBody
-  ( TxOut (..),
+  ( TxBody,
+    TxOut (..),
     txnetworkid',
   )
 import qualified Cardano.Ledger.Alonzo.TxBody as Alonzo (TxBody, TxOut)
@@ -44,6 +42,7 @@ import qualified Cardano.Ledger.Core as Core
 import Cardano.Ledger.Era (Crypto, Era, TxInBlock, ValidateScript (..))
 import qualified Cardano.Ledger.Era as Era
 import qualified Cardano.Ledger.Mary.Value as Alonzo (Value)
+import Cardano.Ledger.Pretty (PrettyA (..))
 import Cardano.Ledger.Rules.ValidationMode ((?!#))
 import Cardano.Ledger.Shelley.Constraints
   ( UsesPParams,
@@ -76,6 +75,7 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Typeable (Typeable)
+import Debug.Trace (trace)
 import GHC.Generics (Generic)
 import GHC.Records
 import NoThunks.Class (NoThunks)
@@ -268,6 +268,12 @@ feesOK ::
     HasField "_minfeeA" (Core.PParams era) Natural,
     HasField "_minfeeB" (Core.PParams era) Natural,
     HasField "_prices" (Core.PParams era) Prices,
+    Core.Script era ~ Script era,
+    Core.TxBody era ~ TxBody era,
+    Show (Core.Value era),
+    PrettyA (Core.Value era),
+    PrettyA (Core.PParamsDelta era),
+    PrettyA (Core.AuxiliaryData era),
     HasField "_collateralPercentage" (Core.PParams era) Natural
     -- HasField "address" (Alonzo.TxOut era) (Addr (Crypto era))
   ) =>
@@ -284,7 +290,7 @@ feesOK pp tx (UTxO m) = do
       minimumFee = minfee @era pp tx
       collPerc = getField @"_collateralPercentage" pp
   -- Part 1
-  (minimumFee <= theFee) ?! FeeTooSmallUTxO minimumFee theFee
+  (minimumFee <= theFee) ?! FeeTooSmallUTxO (trace ("\nTx =\n" ++ show (ppTx tx)) minimumFee) theFee
   -- Part 2
   if nullRedeemers . txrdmrs' . wits $ tx
     then pure ()
@@ -332,6 +338,12 @@ utxoTransition ::
     Core.Value era ~ Alonzo.Value (Crypto era),
     Core.TxBody era ~ Alonzo.TxBody era,
     TxInBlock era ~ Alonzo.ValidatedTx era,
+    Core.Script era ~ Script era,
+    Core.TxBody era ~ TxBody era,
+    Show (Core.Value era),
+    PrettyA (Core.Value era),
+    PrettyA (Core.PParamsDelta era),
+    PrettyA (Core.AuxiliaryData era),
     Era.TxSeq era ~ Alonzo.TxSeq era
   ) =>
   TransitionRule (AlonzoUTXO era)
@@ -453,7 +465,7 @@ utxoTransition = do
 
   {-   totExunits tx ≤ maxTxExUnits pp    -}
   let maxTxEx = getField @"_maxTxExUnits" pp
-      totExunits = getField @"totExunits" tx
+      totExunits = getField @"totExunits" tx -- This sums up the ExUnits for all embedded Plutus Scripts anywhere in the transaction.
   pointWiseExUnits (<=) totExunits maxTxEx ?! ExUnitsTooBigUTxO maxTxEx totExunits
 
   {-   ‖collateral tx‖  ≤  maxCollInputs pp   -}
@@ -495,6 +507,12 @@ instance
     Core.TxBody era ~ Alonzo.TxBody era,
     Core.TxOut era ~ Alonzo.TxOut era,
     Era.TxSeq era ~ Alonzo.TxSeq era,
+    Core.Script era ~ Script era,
+    Core.TxBody era ~ TxBody era,
+    Show (Core.Value era),
+    PrettyA (Core.Value era),
+    PrettyA (Core.PParamsDelta era),
+    PrettyA (Core.AuxiliaryData era),
     Era.TxInBlock era ~ Alonzo.ValidatedTx era
   ) =>
   STS (AlonzoUTXO era)

@@ -87,9 +87,9 @@ instance (CryptoClass.Crypto c) => ScriptClass (MaryEra c) where
 
 instance (CryptoClass.Crypto c, Mock c) => EraGen (MaryEra c) where
   genGenesisValue = maryGenesisValue
-  genEraTxBody _ge = genTxBody
+  genEraTxBody _ge _utxo = genTxBody
   genEraAuxiliaryData = genAuxiliaryData
-  updateEraTxBody _pp _wits (TxBody existingins outs cert wdrl _txfee vi upd meta mint) fee ins out =
+  updateEraTxBody _utxo _pp _wits (TxBody existingins outs cert wdrl _txfee vi upd meta mint) fee ins out =
     TxBody (existingins <> ins) (outs :|> out) cert wdrl fee vi upd meta mint
   genEraPParamsDelta = genShelleyPParamsDelta
   genEraPParams = genPParams

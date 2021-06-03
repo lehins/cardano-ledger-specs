@@ -232,6 +232,7 @@ class
   -- additional script witnessing.
   genEraTxBody ::
     GenEnv era ->
+    UTxO era ->
     Core.PParams era ->
     SlotNo ->
     Set (TxIn (Crypto era)) ->
@@ -248,6 +249,7 @@ class
 
   -- | Update an era-specific TxBody
   updateEraTxBody ::
+    UTxO era ->
     Core.PParams era ->
     Core.Witnesses era ->
     Core.TxBody era ->

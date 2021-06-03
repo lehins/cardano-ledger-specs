@@ -247,7 +247,7 @@ data DataSpace era = DataSpace
  } deriving Show
 
 data TwoPhaseInfo era = TwoPhaseInfo
-  { getScript :: Core.Script era,    -- ^ A Putus Script
+  { getScript :: Core.Script era,    -- ^ A Plutus Script
     getData :: Plutus.Data,          -- ^ A Data that will make it succeed
     getRedeemer ::                   -- ^ A Redeemer that will make it succeed
       ( String,                      -- ^ The Tag (data Tag = Spend | Mint | Cert | Rewrd)
