@@ -277,6 +277,10 @@ class
      Map (ScriptHash (Crypto era)) (Core.Script era) ->
      Core.Witnesses era
 
+  -- When choosing new recipeients from the UTxO, choose only those whose Outputs meet this predicate.
+  genEraGoodTxOut :: Core.TxOut era -> Bool
+  genEraGoodTxOut _ = True -- The default implementation marks every TxOut as good.
+
   unsafeApplyTx :: Core.Tx era -> TxInBlock era
 
 

@@ -101,7 +101,7 @@ defaultConstants :: Constants
 defaultConstants =
   Constants
     { minNumGenInputs = 1,
-      maxNumGenInputs = 10,
+      maxNumGenInputs = 5, -- 10,
       frequencyRegKeyCert = 2,
       frequencyRegPoolCert = 2,
       frequencyDelegationCert = 3,

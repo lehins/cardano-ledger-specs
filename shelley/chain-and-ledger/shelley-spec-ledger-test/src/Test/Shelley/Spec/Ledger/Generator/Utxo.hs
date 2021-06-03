@@ -17,7 +17,6 @@ module Test.Shelley.Spec.Ledger.Generator.Utxo
     Delta (..),
     showBalance,
     getNRandomPairs,
-    vKeyLocked,
   )
 where
 
@@ -115,7 +114,6 @@ import Test.Shelley.Spec.Ledger.Generator.Update (genUpdate)
 import Test.Shelley.Spec.Ledger.Utils (Split (..))
 import Cardano.Ledger.Era(Era)
 import NoThunks.Class()  -- Instances only
-import Cardano.Ledger.Val(adaOnly)
 
 import Debug.Trace(trace)
 
@@ -152,19 +150,6 @@ showBalance
     where txBody = getField @"body" tx
 
 -- ==========================================================
-
-isKeyHashAddr :: Addr crypto -> Bool
-isKeyHashAddr (AddrBootstrap _) = True
-isKeyHashAddr (Addr _ (KeyHashObj _) _) = True
-isKeyHashAddr _ = False
-
--- | We are choosing new TxOut to pay fees, We want only Key locked addresss with Ada only values.
-vKeyLocked :: (HasField "address" (Core.TxOut era) (Addr (Crypto era)),
-               HasField "value" (Core.TxOut era) (Core.Value era),
-               Val (Core.Value era) ) =>
-              Proxy era -> Core.TxOut era -> Bool
-vKeyLocked Proxy txout = isKeyHashAddr (getField @"address" txout) &&
-                         adaOnly (getField @"value" txout)
 
 --  ========================================================================
 
@@ -416,7 +401,7 @@ genNextDelta
               -- 20 has been empirically determined to make non failing Txs
               encodedLen extraWitnesses
             ]
-        deltaFee = (draftSize * 200) <×> Coin (fromIntegral (getField @"_minfeeA" pparams))
+        deltaFee = (draftSize * 70) <×> Coin (fromIntegral (getField @"_minfeeA" pparams))
                    <+> Coin (fromIntegral (getField @"_minfeeB" pparams))  -- This is usually very small, so might not have much effect.
         totalFee = baseTxFee <+> deltaFee :: Coin
         remainingFee = totalFee <-> dfees :: Coin
@@ -438,15 +423,16 @@ genNextDelta
               else -- add a new input to cover the fee
               do
                 let txBody = getField @"body" tx
+                    inputs_in_use = (getField @"inputs" txBody <> extraInputs)
                     utxo' :: UTxO era
                     utxo' =
                       -- Remove possible inputs from Utxo, if they already
                       -- appear in inputs.
                       UTxO $
-                        Map.filter (vKeyLocked (Proxy @ era)) $ -- filter them out if they are not Keylocked
+                        Map.filter (genEraGoodTxOut @era) $  -- filter out URxO entries where the TxOut are not appropriate for this Era (i.e. Keylocked in AlonzoEra)
                         Map.withoutKeys
                           (unUTxO utxo)
-                          (getField @"inputs" txBody <> extraInputs)
+                          inputs_in_use
                 (inputs, value, (vkeyPairs, msigPairs)) <-
                   genInputs (1, 1) ksIndexedPaymentKeys ksIndexedPayScripts utxo'
                 -- It is possible that the Utxo has no possible inputs left, so
@@ -459,7 +445,7 @@ genNextDelta
                 -- testing framework to generate almost-random transactions that aways succeed every time.
                 -- Experience suggests that this happens less than 1% of the time, and does not lead to backtracking.
 
-                !_ <- when (null inputs) (trace ("Discard case 2 "++show(Map.size (unUTxO utxo'))++"  "++show(Map.size (unUTxO utxo))) discard)
+                !_ <- when (null inputs) (trace ("Discard case 2, "++"UTxo size = "++show(Map.size (unUTxO utxo))++", size inputs_in_use = "++show(Set.size inputs_in_use)) discard)
 
                 let newWits =
                       mkTxWits @era

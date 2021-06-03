@@ -32,7 +32,7 @@ import Cardano.Ledger.Alonzo.TxWitness (RdmrPtr (..), Redeemers (..), TxWitness 
 import Cardano.Ledger.AuxiliaryData (AuxiliaryDataHash)
 import Cardano.Ledger.BaseTypes (Network (..), StrictMaybe (..))
 import Cardano.Ledger.Coin (Coin (..))
-import qualified Cardano.Ledger.Core as Core (PParams, PParamsDelta, Script)
+import qualified Cardano.Ledger.Core as Core (PParams, PParamsDelta, Script, TxOut)
 import qualified Cardano.Ledger.Crypto as CC
 import Cardano.Ledger.Era (Crypto, Era (..), ValidateScript (..))
 import Cardano.Ledger.Hashes (ScriptHash)
@@ -43,7 +43,7 @@ import Cardano.Ledger.Pretty (PrettyA (..))
 import Cardano.Ledger.ShelleyMA.AuxiliaryData as Mary (pattern AuxiliaryData)
 import Cardano.Ledger.ShelleyMA.Timelocks (Timelock (..))
 import Cardano.Ledger.Tx (Tx (Tx))
-import Cardano.Ledger.Val ((<+>), (<×>))
+import Cardano.Ledger.Val (adaOnly, (<+>), (<×>))
 import Cardano.Slotting.Slot (SlotNo (..))
 import Control.Monad (replicateM)
 import Data.Hashable (Hashable (..))
@@ -82,13 +82,23 @@ import Test.Shelley.Spec.Ledger.Generator.EraGen (EraGen (..), MinGenTxout (..))
 import Test.Shelley.Spec.Ledger.Generator.ScriptClass (Quantifier (..), ScriptClass (..))
 import Test.Shelley.Spec.Ledger.Generator.Update (genM, genShelleyPParamsDelta)
 import qualified Test.Shelley.Spec.Ledger.Generator.Update as Shelley (genPParams)
-import Test.Shelley.Spec.Ledger.Generator.Utxo (vKeyLocked)
 
 ptrace :: PrettyA t => [Char] -> t -> a -> a
 ptrace x y z = trace ("\n" ++ show (prettyA y) ++ "\n" ++ show x) z
 
 occaisionally :: Hashable a => a -> Int -> String -> String
 occaisionally x n s = if mod (hash x) n == 0 then trace s s else s
+
+isKeyHashAddr :: Addr crypto -> Bool
+isKeyHashAddr (AddrBootstrap _) = True
+isKeyHashAddr (Addr _ (KeyHashObj _) _) = True
+isKeyHashAddr _ = False
+
+-- | We are choosing new TxOut to pay fees, We want only Key locked addresss with Ada only values.
+vKeyLocked :: Mock c => Core.TxOut (AlonzoEra c) -> Bool
+vKeyLocked txout =
+  isKeyHashAddr (getField @"address" txout)
+    && adaOnly (getField @"value" txout)
 
 -- ================================================================
 
@@ -156,7 +166,7 @@ okAsCollateral :: forall c. Mock c => UTxO (AlonzoEra c) -> TxIn c -> Bool
 okAsCollateral utxo inputx =
   case Map.lookup inputx (unUTxO utxo) of
     Nothing -> False
-    Just outputx -> vKeyLocked (Proxy @(AlonzoEra c)) outputx
+    Just outputx -> vKeyLocked outputx
 
 genAlonzoTxBody ::
   forall c.
@@ -319,6 +329,8 @@ instance Mock c => EraGen (AlonzoEra c) where
               else case Map.lookup hash1 scriptinfo of -- It should be one of the known Plutus Scripts
                 Nothing -> ans
                 Just info -> addRedeemMap newbody info purpose ans -- Add it to the redeemer map
+
+  genEraGoodTxOut = vKeyLocked
 
 addRedeemMap ::
   forall c.

@@ -204,7 +204,6 @@ test-suite shelley-spec-ledger-test
       hedgehog >= 1.0.4,
       hedgehog-quickcheck,
       iproute,
-      plutus-tx,
       prettyprinter,
       QuickCheck,
       scientific,
