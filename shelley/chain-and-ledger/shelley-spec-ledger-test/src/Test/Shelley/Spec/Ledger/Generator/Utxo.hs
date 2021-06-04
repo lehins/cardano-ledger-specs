@@ -198,7 +198,6 @@ genTx
              ksIndexedPayScripts,
              ksIndexedStakeScripts
            }
-         _dataspace
          scriptspace
          constants
        )
@@ -401,7 +400,7 @@ genNextDelta
               -- 20 has been empirically determined to make non failing Txs
               encodedLen extraWitnesses
             ]
-        deltaFee = (draftSize * 70) <×> Coin (fromIntegral (getField @"_minfeeA" pparams))
+        deltaFee = (draftSize * 40) <×> Coin (fromIntegral (getField @"_minfeeA" pparams))
                    <+> Coin (fromIntegral (getField @"_minfeeB" pparams))  -- This is usually very small, so might not have much effect.
         totalFee = baseTxFee <+> deltaFee :: Coin
         remainingFee = totalFee <-> dfees :: Coin

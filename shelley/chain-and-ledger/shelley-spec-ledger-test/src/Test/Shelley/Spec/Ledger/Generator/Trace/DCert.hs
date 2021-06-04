@@ -167,7 +167,6 @@ instance
   sigGen
     ( GenEnv
         ks
-        _dataspace
         _scriptspace
         constants
       )
@@ -212,7 +211,6 @@ genDCerts ::
 genDCerts
   ge@( GenEnv
          KeySpace_ {ksIndexedStakingKeys}
-         _dataspace
          _scriptspace
          Constants {maxCertsPerTx}
        )

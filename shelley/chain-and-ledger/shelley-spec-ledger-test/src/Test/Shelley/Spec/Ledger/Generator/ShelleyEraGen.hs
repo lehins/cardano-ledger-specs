@@ -72,7 +72,6 @@ instance
   genGenesisValue
     ( GenEnv
         _keySpace
-        _dataspace
         _scriptspace
         Constants {minGenesisOutputVal, maxGenesisOutputVal}
       ) =

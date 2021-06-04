@@ -37,7 +37,6 @@ module Test.Cardano.Ledger.Alonzo.Trials
     payscript,
     stakescript,
     scripts,
-    dataspace,
     scriptspace,
     theutxo,
     alls,
@@ -90,7 +89,7 @@ import Test.Cardano.Ledger.Alonzo.AlonzoEraGen ()
 import Test.Cardano.Ledger.EraBuffet (TestCrypto)
 import Test.Shelley.Spec.Ledger.Generator.Block (genBlock)
 import Test.Shelley.Spec.Ledger.Generator.Constants (Constants (..))
-import Test.Shelley.Spec.Ledger.Generator.Core (DataSpace (..), GenEnv (..), KeySpace (..), ScriptSpace (..), hashData)
+import Test.Shelley.Spec.Ledger.Generator.Core (GenEnv (..), KeySpace (..), ScriptSpace (..), hashData)
 import Test.Shelley.Spec.Ledger.Generator.EraGen (EraGen (..), allScripts, genUtxo0)
 import Test.Shelley.Spec.Ledger.Generator.Presets (genEnv)
 import Test.Shelley.Spec.Ledger.Generator.ShelleyEraGen ()
@@ -197,10 +196,9 @@ genShelleyBlock = genstuff (Proxy @(ShelleyEra TestCrypto)) (\genv cs _nep _ep _
 
 keys :: KeySpace (AlonzoEra TestCrypto)
 _constants :: Constants
-dataspace :: DataSpace (AlonzoEra TestCrypto)
 scriptspace :: ScriptSpace (AlonzoEra TestCrypto)
 genenv0 :: GenEnv (AlonzoEra TestCrypto)
-genenv0@(GenEnv keys dataspace scriptspace _constants) = genEnv (Proxy @(AlonzoEra TestCrypto))
+genenv0@(GenEnv keys scriptspace _constants) = genEnv (Proxy @(AlonzoEra TestCrypto))
 
 -- In scripts, n ranges over [0..149]
 scripts :: Int -> (PDoc, PDoc)

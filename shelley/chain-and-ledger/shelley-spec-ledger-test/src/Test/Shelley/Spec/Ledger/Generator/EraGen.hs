@@ -298,7 +298,7 @@ someKeyPairs c lower upper =
 
 
 genUtxo0 :: forall era. EraGen era => GenEnv era -> Gen (UTxO era)
-genUtxo0 ge@(GenEnv _ _ _ c@Constants {minGenesisUTxOouts, maxGenesisUTxOouts}) = do
+genUtxo0 ge@(GenEnv _ _ c@Constants {minGenesisUTxOouts, maxGenesisUTxOouts}) = do
   genesisKeys <- someKeyPairs c minGenesisUTxOouts maxGenesisUTxOouts
   genesisScripts <- someScripts @era c minGenesisUTxOouts maxGenesisUTxOouts
   outs <-

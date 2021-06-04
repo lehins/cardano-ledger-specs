@@ -87,7 +87,7 @@ instance (CryptoClass.Crypto c) => ScriptClass (AllegraEra c) where
   unQuantify _ = unQuantifyTL
 
 instance (CryptoClass.Crypto c, Mock c) => EraGen (AllegraEra c) where
-  genGenesisValue (GenEnv _keySpace _dataspace _scriptspace Constants {minGenesisOutputVal, maxGenesisOutputVal}) =
+  genGenesisValue (GenEnv _keySpace _scriptspace Constants {minGenesisOutputVal, maxGenesisOutputVal}) =
     genCoin minGenesisOutputVal maxGenesisOutputVal
   genEraTxBody _ge _utxo = genTxBody
   genEraAuxiliaryData = genAuxiliaryData
