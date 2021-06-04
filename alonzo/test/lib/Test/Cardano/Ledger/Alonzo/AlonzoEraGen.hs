@@ -19,6 +19,7 @@ import qualified Cardano.Ledger.Alonzo.PParams as Alonzo (PParams, extendPP, ret
 import Cardano.Ledger.Alonzo.PlutusScriptApi (scriptsNeeded, scriptsNeededFromBody)
 import Cardano.Ledger.Alonzo.Rules.Utxo (utxoEntrySize)
 import Cardano.Ledger.Alonzo.Rules.Utxow (langsUsed)
+import Cardano.Ledger.Alonzo.Scripts (isPlutusScript, scriptfee)
 import Cardano.Ledger.Alonzo.Scripts as Alonzo
   ( CostModel (..),
     ExUnits (..),
@@ -331,6 +332,14 @@ instance Mock c => EraGen (AlonzoEra c) where
                 Just info -> addRedeemMap newbody info purpose ans -- Add it to the redeemer map
 
   genEraGoodTxOut = vKeyLocked
+  genEraScriptCost pp script =
+    if isPlutusScript script
+      then case List.find (\info -> (getScript @(AlonzoEra c) info) == script) genEraTwoPhaseScripts of
+        Just info -> scriptfee (getField @"_prices" pp) (ExUnits mems steps)
+          where
+            (_tag, _, _, mems, steps) = getRedeemer info
+        Nothing -> Coin 0
+      else Coin 0
 
 addRedeemMap ::
   forall c.

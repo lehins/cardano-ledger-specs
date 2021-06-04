@@ -33,7 +33,7 @@ module Test.Shelley.Spec.Ledger.Generator.EraGen
 import Cardano.Binary (ToCBOR (toCBOR),FromCBOR,Annotator)
 import qualified Cardano.Crypto.Hash as Hash
 import Cardano.Ledger.AuxiliaryData (AuxiliaryDataHash)
-import Cardano.Ledger.Coin (Coin)
+import Cardano.Ledger.Coin (Coin(..))
 import qualified Cardano.Ledger.Core as Core
 import qualified Cardano.Ledger.Crypto as CC (HASH,Crypto)
 import Cardano.Ledger.Era (Crypto, ValidateScript (..),TxInBlock)
@@ -282,6 +282,9 @@ class
   genEraGoodTxOut _ = True -- The default implementation marks every TxOut as good.
 
   unsafeApplyTx :: Core.Tx era -> TxInBlock era
+
+  genEraScriptCost :: Core.PParams era -> Core.Script era -> Coin
+  genEraScriptCost _pp _script = Coin 0
 
 
 
