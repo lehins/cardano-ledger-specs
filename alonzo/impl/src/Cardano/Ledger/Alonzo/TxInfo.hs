@@ -49,7 +49,6 @@ import qualified Data.Set as Set
 import Data.Time.Clock (nominalDiffTimeToSeconds)
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import Data.Typeable (Typeable)
-import Debug.Trace (trace)
 import GHC.Records (HasField (..))
 import qualified Plutus.V1.Ledger.Ada as P (adaSymbol, adaToken)
 import qualified Plutus.V1.Ledger.Address as P (Address (..))
@@ -346,7 +345,7 @@ runPLCScript (CostModel cost) scriptbytestring units ds =
     (transExUnits units)
     scriptbytestring
     ds of
-    (_, Left e) -> trace ("\nrunPLC\n  " ++ show scriptbytestring ++ "\n message" ++ show e ++ "\n  cost" ++ show cost) False
+    (_, Left _) -> False
     (_, Right ()) -> True
 
 validPlutusdata :: P.Data -> Bool

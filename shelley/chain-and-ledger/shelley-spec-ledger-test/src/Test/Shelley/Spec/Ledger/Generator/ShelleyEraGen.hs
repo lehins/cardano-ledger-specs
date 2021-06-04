@@ -88,7 +88,7 @@ instance
   genEraPParamsDelta = genShelleyPParamsDelta
   genEraPParams = genPParams
 
-  genEraWitnesses _scriptinfo setWitVKey mapScriptWit = WitnessSet setWitVKey mapScriptWit mempty
+  genEraWitnesses _ setWitVKey mapScriptWit = WitnessSet setWitVKey mapScriptWit mempty
   unsafeApplyTx x = x
 
 
