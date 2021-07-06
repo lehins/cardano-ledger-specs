@@ -41,6 +41,7 @@ module Cardano.Ledger.Alonzo.Scripts
   )
 where
 
+import Data.Ratio
 import Cardano.Binary (DecoderError (..), FromCBOR (fromCBOR), ToCBOR (toCBOR), serialize')
 import Cardano.Ledger.BaseTypes
 import Cardano.Ledger.Coin (Coin (..))
@@ -245,10 +246,18 @@ instance FromCBOR ExUnits where
   fromCBOR = decode $ RecD ExUnits <! From <! From
 
 instance ToCBOR Prices where
-  toCBOR (Prices m s) = encode $ Rec Prices !> To m !> To s
+  toCBOR (Prices m s) =
+    encode $ Rec Prices !> E (toCBOR . numerator . unboundRational) m
+                        !> E (toCBOR . numerator . unboundRational) s
+
 
 instance FromCBOR Prices where
-  fromCBOR = decode $ RecD Prices <! From <! From
+  fromCBOR = decode $ RecD toPrices <! From <! From
+    where
+      toPrices m s =
+        case Prices <$> boundRational (m % 1) <*> boundRational (s % 1) of
+          Nothing -> error $ "Dammit: " ++ show m ++ ", " ++ show s
+          Just p -> p
 
 instance forall era. (Typeable (Crypto era), Typeable era) => ToCBOR (Script era) where
   toCBOR x = encode (encodeScript x)
