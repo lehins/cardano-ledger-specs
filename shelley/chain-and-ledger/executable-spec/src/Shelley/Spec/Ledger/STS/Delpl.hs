@@ -111,22 +111,6 @@ instance
 
 instance
   ( Era era,
-    ToCBOR (PredicateFailure (Core.EraRule "POOL" era)),
-    ToCBOR (PredicateFailure (Core.EraRule "DELEG" era)),
-    Typeable (Core.Script era)
-  ) =>
-  ToCBOR (DelplPredicateFailure era)
-  where
-  toCBOR = \case
-    (PoolFailure a) ->
-      encodeListLen 2 <> toCBOR (0 :: Word8)
-        <> toCBOR a
-    (DelegFailure a) ->
-      encodeListLen 2 <> toCBOR (1 :: Word8)
-        <> toCBOR a
-
-instance
-  ( Era era,
     FromCBOR (PredicateFailure (Core.EraRule "POOL" era)),
     FromCBOR (PredicateFailure (Core.EraRule "DELEG" era)),
     Typeable (Core.Script era)

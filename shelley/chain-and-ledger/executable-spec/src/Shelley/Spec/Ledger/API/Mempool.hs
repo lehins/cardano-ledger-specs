@@ -214,12 +214,12 @@ deriving stock instance
   Show (ApplyTxError era)
 
 instance
-  ( ShelleyBased era,
-    ToCBOR (PredicateFailure (Core.EraRule "LEDGER" era))
+  ( ShelleyBased era--,
+    --ToCBOR (PredicateFailure (Core.EraRule "LEDGER" era))
   ) =>
   ToCBOR (ApplyTxError era)
   where
-  toCBOR (ApplyTxError es) = toCBOR es
+  toCBOR (ApplyTxError es) = undefined --toCBOR es
 
 instance
   ( ShelleyBased era,

@@ -146,26 +146,6 @@ instance
 
 instance
   ( Era era,
-    Typeable (Core.Script era),
-    ToCBOR (PredicateFailure (Core.EraRule "DELPL" era))
-  ) =>
-  ToCBOR (DelegsPredicateFailure era)
-  where
-  toCBOR = \case
-    DelegateeNotRegisteredDELEG kh ->
-      encodeListLen 2
-        <> toCBOR (0 :: Word8)
-        <> toCBOR kh
-    WithdrawalsNotInRewardsDELEGS ws ->
-      encodeListLen 2
-        <> toCBOR (1 :: Word8)
-        <> mapToCBOR ws
-    (DelplFailure a) ->
-      encodeListLen 2 <> toCBOR (2 :: Word8)
-        <> toCBOR a
-
-instance
-  ( Era era,
     FromCBOR (PredicateFailure (Core.EraRule "DELPL" era)),
     Typeable (Core.Script era)
   ) =>

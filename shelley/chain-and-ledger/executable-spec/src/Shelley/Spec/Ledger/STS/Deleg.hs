@@ -155,48 +155,6 @@ instance
 instance NoThunks (DelegPredicateFailure era)
 
 instance
-  (Typeable era, Era era, Typeable (Core.Script era)) =>
-  ToCBOR (DelegPredicateFailure era)
-  where
-  toCBOR = \case
-    StakeKeyAlreadyRegisteredDELEG cred ->
-      encodeListLen 2 <> toCBOR (0 :: Word8) <> toCBOR cred
-    StakeKeyNotRegisteredDELEG cred ->
-      encodeListLen 2 <> toCBOR (1 :: Word8) <> toCBOR cred
-    StakeKeyNonZeroAccountBalanceDELEG rewardBalance ->
-      encodeListLen 2 <> toCBOR (2 :: Word8) <> toCBOR rewardBalance
-    StakeDelegationImpossibleDELEG cred ->
-      encodeListLen 2 <> toCBOR (3 :: Word8) <> toCBOR cred
-    WrongCertificateTypeDELEG ->
-      encodeListLen 1 <> toCBOR (4 :: Word8)
-    GenesisKeyNotInMappingDELEG gkh ->
-      encodeListLen 2 <> toCBOR (5 :: Word8) <> toCBOR gkh
-    DuplicateGenesisDelegateDELEG kh ->
-      encodeListLen 2 <> toCBOR (6 :: Word8) <> toCBOR kh
-    InsufficientForInstantaneousRewardsDELEG pot needed potAmount ->
-      encodeListLen 4 <> toCBOR (7 :: Word8)
-        <> toCBOR pot
-        <> toCBOR needed
-        <> toCBOR potAmount
-    MIRCertificateTooLateinEpochDELEG sNow sTooLate ->
-      encodeListLen 3 <> toCBOR (8 :: Word8) <> toCBOR sNow <> toCBOR sTooLate
-    DuplicateGenesisVRFDELEG vrf ->
-      encodeListLen 2 <> toCBOR (9 :: Word8) <> toCBOR vrf
-    StakeKeyInRewardsDELEG cred ->
-      encodeListLen 2 <> toCBOR (10 :: Word8) <> toCBOR cred
-    MIRTransferNotCurrentlyAllowed ->
-      encodeListLen 1 <> toCBOR (11 :: Word8)
-    MIRNegativesNotCurrentlyAllowed ->
-      encodeListLen 1 <> toCBOR (12 :: Word8)
-    InsufficientForTransferDELEG pot needed available ->
-      encodeListLen 4 <> toCBOR (13 :: Word8)
-        <> toCBOR pot
-        <> toCBOR needed
-        <> toCBOR available
-    MIRProducesNegativeUpdate ->
-      encodeListLen 1 <> toCBOR (14 :: Word8)
-
-instance
   (Era era, Typeable (Core.Script era)) =>
   FromCBOR (DelegPredicateFailure era)
   where

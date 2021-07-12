@@ -125,24 +125,6 @@ instance
   transitionRules = [poolDelegationTransition]
 
 instance
-  (Typeable era, Era era) =>
-  ToCBOR (PoolPredicateFailure era)
-  where
-  toCBOR = \case
-    StakePoolNotRegisteredOnKeyPOOL kh ->
-      encodeListLen 2 <> toCBOR (0 :: Word8) <> toCBOR kh
-    StakePoolRetirementWrongEpochPOOL ce e em ->
-      encodeListLen 4 <> toCBOR (1 :: Word8) <> toCBOR ce <> toCBOR e <> toCBOR em
-    WrongCertificateTypePOOL ct ->
-      encodeListLen 2 <> toCBOR (2 :: Word8) <> toCBOR ct
-    StakePoolCostTooLowPOOL pc mc ->
-      encodeListLen 3 <> toCBOR (3 :: Word8) <> toCBOR pc <> toCBOR mc
-    WrongNetworkPOOL a b c ->
-      encodeListLen 4 <> toCBOR (4 :: Word8) <> toCBOR a <> toCBOR b <> toCBOR c
-    PoolMedataHashTooBig a b ->
-      encodeListLen 3 <> toCBOR (5 :: Word8) <> toCBOR a <> toCBOR b
-
-instance
   (Era era) =>
   FromCBOR (PoolPredicateFailure era)
   where

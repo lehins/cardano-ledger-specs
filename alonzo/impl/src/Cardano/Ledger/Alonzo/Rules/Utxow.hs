@@ -133,33 +133,6 @@ instance
 
 instance
   ( Era era,
-    ToCBOR (PredicateFailure (Core.EraRule "UTXO" era)),
-    Typeable (Core.AuxiliaryData era),
-    Typeable (Core.Script era),
-    ToCBOR (Core.Script era)
-  ) =>
-  ToCBOR (AlonzoPredFail era)
-  where
-  toCBOR x = encode (encodePredFail x)
-
-encodePredFail ::
-  ( Era era,
-    ToCBOR (PredicateFailure (Core.EraRule "UTXO" era)),
-    Typeable (Core.Script era),
-    Typeable (Core.AuxiliaryData era)
-  ) =>
-  AlonzoPredFail era ->
-  Encode 'Open (AlonzoPredFail era)
-encodePredFail (WrappedShelleyEraFailure x) = Sum WrappedShelleyEraFailure 0 !> E toCBOR x
-encodePredFail (UnRedeemableScripts x) = Sum UnRedeemableScripts 1 !> To x
-encodePredFail (MissingRequiredDatums x y) = Sum MissingRequiredDatums 2 !> To x !> To y
-encodePredFail (NonOutputSupplimentaryDatums x y) = Sum NonOutputSupplimentaryDatums 3 !> To x !> To y
-encodePredFail (PPViewHashesDontMatch x y) = Sum PPViewHashesDontMatch 4 !> To x !> To y
-encodePredFail (MissingRequiredSigners x) = Sum MissingRequiredSigners 5 !> To x
-encodePredFail (UnspendableUTxONoDatumHash x) = Sum UnspendableUTxONoDatumHash 6 !> To x
-
-instance
-  ( Era era,
     FromCBOR (PredicateFailure (Core.EraRule "UTXO" era)),
     Typeable (Core.Script era),
     Typeable (Core.AuxiliaryData era)

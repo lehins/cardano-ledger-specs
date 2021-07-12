@@ -106,17 +106,6 @@ instance
   NoThunks (LedgerPredicateFailure era)
 
 instance
-  ( ToCBOR (PredicateFailure (Core.EraRule "DELEGS" era)),
-    ToCBOR (PredicateFailure (Core.EraRule "UTXOW" era)),
-    Era era
-  ) =>
-  ToCBOR (LedgerPredicateFailure era)
-  where
-  toCBOR = \case
-    (UtxowFailure a) -> encodeListLen 2 <> toCBOR (0 :: Word8) <> toCBOR a
-    (DelegsFailure a) -> encodeListLen 2 <> toCBOR (1 :: Word8) <> toCBOR a
-
-instance
   ( FromCBOR (PredicateFailure (Core.EraRule "DELEGS" era)),
     FromCBOR (PredicateFailure (Core.EraRule "UTXOW" era)),
     Era era

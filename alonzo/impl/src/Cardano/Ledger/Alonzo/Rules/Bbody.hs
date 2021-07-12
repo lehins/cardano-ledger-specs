@@ -96,15 +96,6 @@ deriving anyclass instance
 
 instance
   ( Typeable era,
-    ToCBOR (BbodyPredicateFailure era)
-  ) =>
-  ToCBOR (AlonzoBbodyPredFail era)
-  where
-  toCBOR (ShelleyInAlonzoPredFail x) = encode (Sum ShelleyInAlonzoPredFail 0 !> To x)
-  toCBOR (TooManyExUnits x y) = encode (Sum TooManyExUnits 1 !> To x !> To y)
-
-instance
-  ( Typeable era,
     FromCBOR (BbodyPredicateFailure era) -- TODO why is there no FromCBOR for (BbodyPredicateFailure era)
   ) =>
   FromCBOR (AlonzoBbodyPredFail era)

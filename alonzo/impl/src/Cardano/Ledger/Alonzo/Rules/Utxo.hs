@@ -523,16 +523,16 @@ instance
 -- Serialisation
 --------------------------------------------------------------------------------
 
-instance
-  ( Typeable era,
-    Era era,
-    ToCBOR (Core.TxOut era),
-    ToCBOR (Core.Value era),
-    ToCBOR (PredicateFailure (Core.EraRule "UTXOS" era))
-  ) =>
-  ToCBOR (UtxoPredicateFailure era)
-  where
-  toCBOR x = encode (encFail x)
+-- instance
+--   ( Typeable era,
+--     Era era,
+--     ToCBOR (Core.TxOut era),
+--     ToCBOR (Core.Value era),
+--     ToCBOR (PredicateFailure (Core.EraRule "UTXOS" era))
+--   ) =>
+--   ToCBOR (UtxoPredicateFailure era)
+--   where
+--   toCBOR x = encode (encFail x)
 
 encFail ::
   forall era.

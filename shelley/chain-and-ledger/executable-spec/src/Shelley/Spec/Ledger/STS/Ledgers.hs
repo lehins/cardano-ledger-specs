@@ -87,14 +87,6 @@ instance
 
 instance
   ( ShelleyBased era,
-    ToCBOR (PredicateFailure (Core.EraRule "LEDGER" era))
-  ) =>
-  ToCBOR (LedgersPredicateFailure era)
-  where
-  toCBOR (LedgerFailure e) = toCBOR e
-
-instance
-  ( ShelleyBased era,
     FromCBOR (PredicateFailure (Core.EraRule "LEDGER" era))
   ) =>
   FromCBOR (LedgersPredicateFailure era)

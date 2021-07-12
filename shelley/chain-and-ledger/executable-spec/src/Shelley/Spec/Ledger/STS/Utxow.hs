@@ -163,40 +163,6 @@ deriving stock instance
 
 instance
   ( Era era,
-    Typeable (Core.Script era),
-    Typeable (Core.AuxiliaryData era),
-    ToCBOR (PredicateFailure (Core.EraRule "UTXO" era))
-  ) =>
-  ToCBOR (UtxowPredicateFailure era)
-  where
-  toCBOR = \case
-    InvalidWitnessesUTXOW wits ->
-      encodeListLen 2 <> toCBOR (0 :: Word8) <> encodeFoldable wits
-    MissingVKeyWitnessesUTXOW (WitHashes missing) ->
-      encodeListLen 2 <> toCBOR (1 :: Word8) <> encodeFoldable missing
-    MissingScriptWitnessesUTXOW ss ->
-      encodeListLen 2 <> toCBOR (2 :: Word8)
-        <> encodeFoldable ss
-    ScriptWitnessNotValidatingUTXOW ss ->
-      encodeListLen 2 <> toCBOR (3 :: Word8)
-        <> encodeFoldable ss
-    (UtxoFailure a) ->
-      encodeListLen 2 <> toCBOR (4 :: Word8)
-        <> toCBOR a
-    MIRInsufficientGenesisSigsUTXOW sigs ->
-      encodeListLen 2 <> toCBOR (5 :: Word8)
-        <> encodeFoldable sigs
-    MissingTxBodyMetadataHash h ->
-      encodeListLen 2 <> toCBOR (6 :: Word8) <> toCBOR h
-    MissingTxMetadata h ->
-      encodeListLen 2 <> toCBOR (7 :: Word8) <> toCBOR h
-    ConflictingMetadataHash bodyHash fullMDHash ->
-      encodeListLen 3 <> toCBOR (8 :: Word8) <> toCBOR bodyHash <> toCBOR fullMDHash
-    InvalidMetadata ->
-      encodeListLen 1 <> toCBOR (9 :: Word8)
-
-instance
-  ( Era era,
     FromCBOR (PredicateFailure (Core.EraRule "UTXO" era)),
     Typeable (Core.Script era),
     Typeable (Core.AuxiliaryData era)

@@ -98,20 +98,6 @@ instance
   transitionRules = [ppupTransitionNonEmpty]
 
 instance
-  (Typeable era, Era era) =>
-  ToCBOR (PpupPredicateFailure era)
-  where
-  toCBOR = \case
-    (NonGenesisUpdatePPUP a b) ->
-      encodeListLen 3
-        <> toCBOR (0 :: Word8)
-        <> toCBOR a
-        <> toCBOR b
-    PPUpdateWrongEpoch ce e vp ->
-      encodeListLen 4 <> toCBOR (1 :: Word8) <> toCBOR ce <> toCBOR e <> toCBOR vp
-    PVCannotFollowPPUP p -> encodeListLen 2 <> toCBOR (2 :: Word8) <> toCBOR p
-
-instance
   (Era era) =>
   FromCBOR (PpupPredicateFailure era)
   where
