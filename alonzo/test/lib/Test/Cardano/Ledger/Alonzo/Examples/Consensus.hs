@@ -7,7 +7,7 @@ module Test.Cardano.Ledger.Alonzo.Examples.Consensus where
 import Cardano.Ledger.Alonzo (AlonzoEra)
 import Cardano.Ledger.Alonzo.Data (AuxiliaryData (..), AuxiliaryDataHash (..), Data (..), hashData)
 import Cardano.Ledger.Alonzo.PParams (PParams' (..), emptyPParams, emptyPParamsUpdate)
-import Cardano.Ledger.Alonzo.Scripts (ExUnits (..), Script (..), alwaysFails, alwaysSucceeds)
+import Cardano.Ledger.Alonzo.Scripts (ExUnits (..), Script (..))
 import qualified Cardano.Ledger.Alonzo.Scripts as Tag (Tag (..))
 import Cardano.Ledger.Alonzo.Tx (IsValidating (..), ValidatedTx (..))
 import Cardano.Ledger.Alonzo.TxBody (TxBody (..), TxOut (..))
@@ -135,7 +135,7 @@ exampleTx =
     ( TxWitness
         (makeWitnessesVKey (hashAnnotated exampleTxBodyAlonzo) [asWitness SLE.examplePayKey]) -- vkey
         mempty -- bootstrap
-        (Map.singleton (hashScript @StandardAlonzo $ alwaysSucceeds 3) (alwaysSucceeds 3)) -- txscripts
+        (Map.singleton (hashScript @StandardAlonzo as) as) -- txscripts
         (TxDats $ Map.singleton (hashData datumExample) datumExample)
         ( Redeemers $
             Map.singleton (RdmrPtr Tag.Spend 0) (redeemerExample, ExUnits 5000 5000)
@@ -144,8 +144,10 @@ exampleTx =
     ( SJust $
         AuxiliaryData
           SLE.exampleMetadataMap -- metadata
-          (StrictSeq.fromList [alwaysFails 2, TimelockScript $ RequireAllOf mempty]) -- Scripts
+          (StrictSeq.fromList [ PlutusScript "G\SOH\NUL\NUL \STX\NULa"
+                              , TimelockScript $ RequireAllOf mempty]) -- Scripts
     )
+  where as = PlutusScript "K\SOH\NUL\NUL \STX\NUL \STX\NUL\NUL\DC1"
 
 exampleTransactionInBlock :: ValidatedTx StandardAlonzo
 exampleTransactionInBlock = ValidatedTx b w (IsValidating True) a
