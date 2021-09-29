@@ -1,13 +1,22 @@
 
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE UnboxedTuples #-}
 
 module Cardano.Ledger.State.Massiv where
 
+import Foreign.Storable
+import GHC.IO
+import qualified GHC.Exts
 import Cardano.Ledger.State.UTxO
 import Control.Monad
 import Cardano.Ledger.Compactible
-import Data.ByteString.Short
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Unsafe as BS
+import Data.ByteString.Short as BSS
 import qualified Cardano.Address.Style.Byron as AB
 import qualified Cardano.Address.Style.Icarus as AI
 import qualified Cardano.Address.Style.Shelley as AS
@@ -46,7 +55,7 @@ import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Read as T
-
+import GHC.StableName
 import Data.Massiv.Array as A
 import Data.Massiv.Array.Unsafe as A
 import Data.Massiv.Array.Mutable.Algorithms as A
@@ -124,70 +133,140 @@ loadMassivUTxOv' (ArrayMap v) = do
 
 loadMassivUTxOs :: FilePath -> IO UTxOs
 loadMassivUTxOs fp = do
-  ArrayMap vTxOut <- loadMassivUTxO fp
-  putStrLn "Starting to fold"
-  u <-
-    case foldrS convertToRef (mempty, mempty, mempty, mempty) vTxOut of
-      (!khMap, !shMap, !dhMap, vec) -> do
-        putStrLn "Done to folding, starting to compute"
-        arrMap <- computeIO vec
-        putStrLn "Computed"
-        pure $! UTxOs
-          { utxoMap = loadMassivUTxOv' $ ArrayMap arrMap
-          , utxoKeyHashSet = refSetFromMap khMap
-          , utxoScriptHashSet = refSetFromMap shMap
-          , utxoDataHashSet = refSetFromMap dhMap
-          }
-  putStrLn $ unlines
-    [ "utxoMap: " <> show (A.size (unArrayMap (utxoMap u)))
-    , "utxoKeyHashSet: " <> show (A.size (unRefSet (utxoKeyHashSet u)))
-    , "utxoScriptHashSet: " <> show (A.size (unRefSet (utxoScriptHashSet u)))
-    , "utxoDataHashSet: " <> show (A.size (unRefSet (utxoDataHashSet u)))
-    ]
-  pure u
+  -- let !bss = BS.pack [1..28]
+  --     m = Map.singleton bss "Some arbitrary value"
+  --     i = Map.findIndex bss m
+  --     (!bss', _) = Map.elemAt i m
+  -- ptr <- IO $ \s ->
+  --   case GHC.Exts.anyToAddr# bss s of
+  --     (# s', addr# #) -> (# s', GHC.Exts.Ptr addr# #)
+  -- ptr' <- IO $ \s ->
+  --   case GHC.Exts.anyToAddr# bss' s of
+  --     (# s', addr# #) -> (# s', GHC.Exts.Ptr addr# #)
+  -- sn <- makeStableName bss
+  -- sn' <- makeStableName bss'
+  -- putStrLn $ "Stable names equal: " <> show (eqStableName sn sn')
+  -- putStrLn $ "Pointers equal: " <> show (ptr == (ptr' :: GHC.Exts.Ptr ()))
+  -- BS.unsafeUseAsCString bss $ \ptr1 ->
+  --   BS.unsafeUseAsCString bss' $ \ptr2 ->
+  --     putStrLn $ "Underlying pointers are of course equal: " <> show (ptr1 == ptr2)
+  -- putStrLn $ "But ByteString type pointers are not equal: " <> show ptr <> " /= " <> show ptr'
+  case hashFromBytes $ BS.pack [1..28] of
+    Nothing -> error "Mistake converting hash bytes"
+    Just h -> do
+      let kh = Keys.KeyHash h :: Keys.KeyHash 'Shelley.Witness StandardCrypto
+          m = Map.singleton kh "Some arbitrary value"
+          i = Map.findIndex kh m
+          (kh', _) = Map.elemAt i m
+      sn <- makeStableName kh
+      sn' <- makeStableName kh'
+      putStrLn $ "Stable names equal: " <> show (eqStableName sn sn')
+      ptr <- IO $ \s ->
+        case GHC.Exts.anyToAddr# kh s of
+          (# s', addr# #) -> (# s', GHC.Exts.Ptr addr# #)
+      ptr' <- IO $ \s ->
+        case GHC.Exts.anyToAddr# kh' s of
+          (# s', addr# #) -> (# s', GHC.Exts.Ptr addr# #)
+      putStrLn $ "Pointers equal: " <> show (ptr == (ptr' :: GHC.Exts.Ptr (GHC.Exts.Ptr ())))
+      pp <- peek ptr
+      pp' <- peek ptr'
+      putStrLn $ "Pointers of Pointers equal: " <> show (pp == pp')
+      error $ "Pointers: " <> show ptr <> " /= " <> show ptr' <> ", " <> show pp <> " /= " <> show pp'
+
+  -- ArrayMap vTxOut <- loadMassivUTxO fp
+  -- putStrLn "Starting to fold"
+  -- u <-
+  --   case foldrS convertToRef (mempty, mempty, mempty, mempty) vTxOut of
+  --     (!khMap, !shMap, !dhMap, vec) -> do
+  --       putStrLn "Done to folding, starting to compute"
+  --       arrMap <- computeIO vec
+  --       putStrLn "Computed"
+  --       pure $! UTxOs
+  --         { utxoMap = loadMassivUTxOv' $ ArrayMap arrMap
+  --         , utxoKeyHashSet = refSetFromMap khMap
+  --         , utxoScriptHashSet = refSetFromMap shMap
+  --         , utxoDataHashSet = refSetFromMap dhMap
+  --         }
+  -- putStrLn $ unlines
+  --   [ "utxoMap: " <> show (A.size (unArrayMap (utxoMap u)))
+  --   , "utxoKeyHashSet: " <> show (A.size (unRefSet (utxoKeyHashSet u)))
+  --   , "utxoScriptHashSet: " <> show (A.size (unRefSet (utxoScriptHashSet u)))
+  --   , "utxoDataHashSet: " <> show (A.size (unRefSet (utxoDataHashSet u)))
+  --   ]
+  -- verifyCreds (utxoKeyHashSet u) (utxoScriptHashSet u) (unArrayMap (utxoMap u))
+  -- pure u
+  -- where
+  --   insertCredential cred khmap shmap =
+  --     case cred of
+  --       KeyHashObj kh
+  --         | (khRef, khmap') <- insertRefMap (Keys.asWitness kh) khmap ->
+  --           (CredKeyRef khRef, khmap', shmap)
+  --       ScriptHashObj sh
+  --         | (shRef, shmap') <- insertRefMap sh shmap ->
+  --           (CredScriptRef shRef, khmap, shmap')
+  --   convertToRef ::
+  --        MapElt (TxIn C) (Alonzo.TxOut CurrentEra)
+  --     -> ( Map.Map (Shelley.KeyHash 'Shelley.Witness C) Int
+  --        , Map.Map (Shelley.ScriptHash C) Int
+  --        , Map.Map (DataHash C) Int
+  --        , Vector DL (MapElt (TxIn C) TxOut'))
+  --     -> ( Map.Map (Shelley.KeyHash 'Shelley.Witness C) Int
+  --        , Map.Map (Shelley.ScriptHash C) Int
+  --        , Map.Map (DataHash C) Int
+  --        , Vector DL (MapElt (TxIn C) TxOut'))
+  --   convertToRef (MapElt txIn txOut) (!khMap, !shMap, !dhMap, vec) =
+  --     let (!cAddr', !mkTxOut', !dhMap') =
+  --           case txOut of
+  --             Alonzo.TxOutCompact cAddr cVal ->
+  --               (cAddr, \a -> TxOut' a cVal, dhMap)
+  --             Alonzo.TxOutCompactDH cAddr cVal dh
+  --               | (dhRef, dhmap) <- insertRefMap dh dhMap ->
+  --                 (cAddr, \a -> TxOutDH' a cVal dhRef, dhmap)
+  --         (!addr', !khMap', !shMap') =
+  --           case decompactAddr cAddr' of
+  --             AddrBootstrap _ -> (AddrBoot' cAddr', khMap, shMap)
+  --             Addr ni pc sr ->
+  --               let (!pcRef, !khmap, !shmap) = insertCredential pc khMap shMap
+  --                   mkAddr' = Addr' ni pcRef
+  --                in case sr of
+  --                     StakeRefBase cred
+  --                       | (!credRef, !khmap', !shmap') <- insertCredential cred khmap shmap ->
+  --                         (mkAddr' (StakeRef credRef), khmap', shmap')
+  --                     StakeRefPtr ptr -> (mkAddr' (StakePtr ptr), khmap, shmap)
+  --                     StakeRefNull -> (mkAddr' StakeNull, khmap, shmap)
+  --         !elt = MapElt txIn (mkTxOut' addr')
+  --         vec' :: Vector DL (MapElt (TxIn C) TxOut')
+  --         vec' = cons elt vec
+  --      in (khMap', shMap', dhMap', vec')
+
+verifyCreds ::
+     (A.Source r (MapElt k (t TxOut')), Index a, Foldable t)
+  => RefSet (Shelley.KeyHash 'Shelley.Witness C)
+  -> RefSet (Shelley.ScriptHash C)
+  -> A.Array r a (MapElt k (t TxOut'))
+  -> IO ()
+verifyCreds keys scripts txs =
+  A.iforM_ txs $ \i (MapElt _ im) ->
+    Control.Monad.forM_ im $ \case
+      TxOut' addr' _ -> checkAddr' i addr'
+      TxOutDH' addr' _ _ -> checkAddr' i addr'
   where
-    insertCredential cred khmap shmap =
-      case cred of
-        KeyHashObj kh
-          | (khRef, khmap') <- insertRefMap (Keys.coerceKeyRole kh) khmap ->
-            (CredKeyRef khRef, khmap', shmap)
-        ScriptHashObj sh
-          | (shRef, shmap') <- insertRefMap sh shmap ->
-            (CredScriptRef shRef, khmap, shmap')
-    convertToRef ::
-         MapElt (TxIn C) (Alonzo.TxOut CurrentEra)
-      -> ( Map.Map (Shelley.KeyHash 'Shelley.Witness C) Int
-         , Map.Map (Shelley.ScriptHash C) Int
-         , Map.Map (DataHash C) Int
-         , Vector DL (MapElt (TxIn C) TxOut'))
-      -> ( Map.Map (Shelley.KeyHash 'Shelley.Witness C) Int
-         , Map.Map (Shelley.ScriptHash C) Int
-         , Map.Map (DataHash C) Int
-         , Vector DL (MapElt (TxIn C) TxOut'))
-    convertToRef (MapElt txIn txOut) (!khMap, !shMap, !dhMap, vec) =
-      let (!cAddr', !mkTxOut', !dhMap') =
-            case txOut of
-              Alonzo.TxOutCompact cAddr cVal ->
-                (cAddr, \a -> TxOut' a cVal, dhMap)
-              Alonzo.TxOutCompactDH cAddr cVal dh
-                | (dhRef, dhmap) <- insertRefMap dh dhMap ->
-                  (cAddr, \a -> TxOutDH' a cVal dhRef, dhmap)
-          (!addr', !khMap', !shMap') =
-            case decompactAddr cAddr' of
-              AddrBootstrap _ -> (AddrBoot' cAddr', khMap, shMap)
-              Addr ni pc sr ->
-                let (!pcRef, !khmap, !shmap) = insertCredential pc khMap shMap
-                    mkAddr' = Addr' ni pcRef
-                 in case sr of
-                      StakeRefBase cred
-                        | (!credRef, !khmap', !shmap') <- insertCredential cred khmap shmap ->
-                          (mkAddr' (StakeRef credRef), khmap', shmap')
-                      StakeRefPtr ptr -> (mkAddr' (StakePtr ptr), khmap, shmap)
-                      StakeRefNull -> (mkAddr' StakeNull, khmap, shmap)
-          !elt = MapElt txIn (mkTxOut' addr')
-          vec' :: Vector DL (MapElt (TxIn C) TxOut')
-          vec' = cons elt vec
-       in (khMap', shMap', dhMap', vec')
+    checkAddr' i = \case
+      AddrBoot' _ -> pure ()
+      Addr' _ pc sr -> check i pc
+    check i =
+      \case
+        CredKeyRef kr -> do
+          krInTxOut <- makeStableName kr
+          krInSet <- makeStableName $ lookupRefSet' kr keys
+          unless (eqStableName krInTxOut krInSet) $
+            error $ "TxOut at index: " <> show i <> " has not a shared key ref"
+        CredScriptRef kr -> do
+          krInTxOut <- makeStableName kr
+          krInSet <- makeStableName $ lookupRefSet' kr scripts
+          unless (eqStableName krInTxOut krInSet) $
+            error $
+            "TxOut at index: " <> show i <> " has not a shared script ref"
 
 data MapElt k v =
   MapElt
@@ -204,6 +283,11 @@ lookupArrayMap :: Ord k => k -> ArrayMap k v -> Maybe v
 lookupArrayMap k (ArrayMap vec) =
   mapEltValue <$> lookupSortedOn mapEltKey k vec
 
+lookupArrayMap' :: (Show k, Ord k) => k -> ArrayMap k v -> v
+lookupArrayMap' k a =
+  case lookupArrayMap k a of
+    Nothing -> error $ "Key should have been there: " ++ show k
+    Just v -> v
 
 data SetElt v =
   SetElt
@@ -228,10 +312,17 @@ insertRefMap v m =
   case Map.lookupIndex v m of
     Nothing -> (v, Map.insert v 1 m)
     Just i
-      | (v', _) <- Map.elemAt i m -> (v', Map.adjust (+ 1) v' m)
+      | (!v', _) <- Map.elemAt i m -> (v', Map.adjust (+ 1) v' m)
 
 lookupRefSet :: Ord v => v -> RefSet v -> Maybe v
 lookupRefSet k (RefSet vec) = setEltRef <$> lookupSortedOn setEltRef k vec
+
+
+lookupRefSet' :: (Show v, Ord v) => v -> RefSet v -> v
+lookupRefSet' k a =
+  case lookupRefSet k a of
+    Nothing -> error $ "Key should have been there: " ++ show k
+    Just v -> v
 
 lookupSortedOn :: (Manifest r a, Ord b) => (a -> b) -> b -> Vector r a -> Maybe a
 lookupSortedOn f e v = go (k `div` 2) k
