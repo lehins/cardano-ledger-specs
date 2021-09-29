@@ -59,7 +59,7 @@ import GHC.StableName
 import Data.Massiv.Array as A
 import Data.Massiv.Array.Unsafe as A
 import Data.Massiv.Array.Mutable.Algorithms as A
-
+import Control.DeepSeq
 
 newtype UTxOv = UTxOv (Vector B (TxIn C, Alonzo.TxOut CurrentEra))
 
@@ -133,10 +133,10 @@ loadMassivUTxOv' (ArrayMap v) = do
 
 loadMassivUTxOs :: FilePath -> IO UTxOs
 loadMassivUTxOs fp = do
-  -- let !bss = BS.pack [1..28]
+  -- let !bss = BSS.pack [1..28]
   --     m = Map.singleton bss "Some arbitrary value"
   --     i = Map.findIndex bss m
-  --     (!bss', _) = Map.elemAt i m
+  --     !(!bss', _) = Map.elemAt i m
   -- ptr <- IO $ \s ->
   --   case GHC.Exts.anyToAddr# bss s of
   --     (# s', addr# #) -> (# s', GHC.Exts.Ptr addr# #)
@@ -147,31 +147,29 @@ loadMassivUTxOs fp = do
   -- sn' <- makeStableName bss'
   -- putStrLn $ "Stable names equal: " <> show (eqStableName sn sn')
   -- putStrLn $ "Pointers equal: " <> show (ptr == (ptr' :: GHC.Exts.Ptr ()))
-  -- BS.unsafeUseAsCString bss $ \ptr1 ->
-  --   BS.unsafeUseAsCString bss' $ \ptr2 ->
-  --     putStrLn $ "Underlying pointers are of course equal: " <> show (ptr1 == ptr2)
-  -- putStrLn $ "But ByteString type pointers are not equal: " <> show ptr <> " /= " <> show ptr'
+  -- -- BS.unsafeUseAsCString bss $ \ptr1 ->
+  -- --   BS.unsafeUseAsCString bss' $ \ptr2 ->
+  -- --     putStrLn $ "Underlying pointers are of course equal: " <> show (ptr1 == ptr2)
+  -- putStrLn $ "But ShortByteString type pointers are not equal: " <> show ptr <> " /= " <> show ptr'
+  -- undefined
   case hashFromBytes $ BS.pack [1..28] of
     Nothing -> error "Mistake converting hash bytes"
-    Just h -> do
-      let kh = Keys.KeyHash h :: Keys.KeyHash 'Shelley.Witness StandardCrypto
-          m = Map.singleton kh "Some arbitrary value"
-          i = Map.findIndex kh m
-          (kh', _) = Map.elemAt i m
-      sn <- makeStableName kh
-      sn' <- makeStableName kh'
-      putStrLn $ "Stable names equal: " <> show (eqStableName sn sn')
+    Just !h -> do
+      let !(Keys.KeyHash kh) = Keys.KeyHash h :: Keys.KeyHash 'Shelley.Witness StandardCrypto
+          !m = Map.singleton kh "Some arbitrary value"
+          !i = Map.findIndex kh m
+          !(!kh', _) = Map.elemAt i m
       ptr <- IO $ \s ->
         case GHC.Exts.anyToAddr# kh s of
           (# s', addr# #) -> (# s', GHC.Exts.Ptr addr# #)
       ptr' <- IO $ \s ->
         case GHC.Exts.anyToAddr# kh' s of
           (# s', addr# #) -> (# s', GHC.Exts.Ptr addr# #)
-      putStrLn $ "Pointers equal: " <> show (ptr == (ptr' :: GHC.Exts.Ptr (GHC.Exts.Ptr ())))
-      pp <- peek ptr
-      pp' <- peek ptr'
-      putStrLn $ "Pointers of Pointers equal: " <> show (pp == pp')
-      error $ "Pointers: " <> show ptr <> " /= " <> show ptr' <> ", " <> show pp <> " /= " <> show pp'
+      sn <- makeStableName kh
+      sn' <- makeStableName kh'
+      putStrLn $ "Stable names equal: " <> show (eqStableName sn sn')
+      putStrLn $ "Pointers equal: " <> show (ptr == (ptr' :: GHC.Exts.Ptr ()))
+      error $ "Pointers: " <> show ptr <> " /= " <> show ptr'
 
   -- ArrayMap vTxOut <- loadMassivUTxO fp
   -- putStrLn "Starting to fold"

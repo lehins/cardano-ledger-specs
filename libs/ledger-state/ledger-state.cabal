@@ -45,6 +45,7 @@ common project-config
                     , optparse-applicative
                     , heapsize
                     , massiv >= 1.0
+                    , deepseq
 
   ghc-options:        -Wall
                       -Wcompat
