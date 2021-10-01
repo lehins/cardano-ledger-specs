@@ -14,6 +14,7 @@
 
 module Cardano.Ledger.State.Massiv where
 
+import Data.Foldable as F
 import Control.Monad
 import Control.DeepSeq
 import qualified Cardano.Address.Style.Byron as AB
@@ -68,16 +69,15 @@ utxoFromMap m = C.runConduit $ C.sourceList (Map.toList m) C..| sinkMassivUTxO
 
 sinkMassivUTxO :: C.ConduitT (TxIn C, Alonzo.TxOut CurrentEra) C.Void IO UTxOs
 sinkMassivUTxO = do
-  let consTxOut txId txOut Nothing = Just $! A.singleton $ KVPair txId txOut
-      consTxOut txId txOut (Just a) = Just $! A.cons (KVPair txId txOut) a
   das <-
     C.foldlC
-      (\im (!(TxIn txId txIx), !txOut) ->
-         IntMap.alter (consTxOut txId txOut) (fromIntegral txIx) im)
+      (\vec (!(TxIn txId txIx), !txOut) ->
+         let !txOut' = toTxOut' txOut
+         in A.cons (KVPair txId (IntMap.singleton (fromIntegral txIx) txOut')) vec)
       mempty
-  C.lift $
-    constructMassivUTxO . fromIntMap <$>
-    traverse (\da -> withLoadMArray_ da quicksortKVMArray_) das
+  pure $! constructMassivUTxO $ groupOn $ A.computeAs (KV S BN) das
+    -- constructMassivUTxO . fromIntMap <$>
+    -- traverse (\da -> withLoadMArray_ da quicksortKVMArray_) das
 
 testMassivUTxO :: Map.Map (TxIn C) (Alonzo.TxOut CurrentEra) -> UTxOs -> IO ()
 testMassivUTxO m utxo@UTxOs{} =
@@ -92,8 +92,9 @@ testMassivUTxO m utxo@UTxOs{} =
 
 
 collectSharedKeys ::
-  Vector B (Vector (KV S BN) (KVPair (TxId C) TxOut')) ->
-  Vector S (Keys.KeyHash 'Shelley.Witness C)
+     (Source r (f TxOut'), Foldable f)
+  => Vector r (f TxOut')
+  -> Vector S (Keys.KeyHash 'Shelley.Witness C)
 collectSharedKeys txOutVec =
   let extractKeyHashes !accVec =
         \case
@@ -110,7 +111,7 @@ collectSharedKeys txOutVec =
           TxOutMA' addr _ _ _ -> extractKeyHashes accVec addr
           TxOutDH' addr _ _ -> extractKeyHashes accVec addr
           TxOutMADH' addr _ _ _ _ -> extractKeyHashes accVec addr
-      collectHashes !a (KVArray _ vals) = A.foldlS collectKeys a vals
+      collectHashes !a = F.foldl' collectKeys a
       vectorWithKeyHashes :: Vector S (Keys.KeyHash 'Shelley.Witness C)
       vectorWithKeyHashes = A.compute $ foldlS collectHashes A.empty txOutVec
    in A.clone $ -- in order to free up leftover memory allocated while vector was growing
@@ -118,74 +119,65 @@ collectSharedKeys txOutVec =
       A.smapMaybe (\(k, c) -> guard (c > 1) >> Just k) $
       A.tally vectorWithKeyHashes
 
+toTxOut' :: Alonzo.TxOut CurrentEra -> TxOut'
+toTxOut' =
+  \case
+    Alonzo.TxOutCompact cAddr cVal
+      | Mary.CompactValue (Mary.CompactValueAdaOnly ada) <- cVal ->
+        TxOut' (restructureAddr cAddr) ada
+      | Mary.CompactValue (Mary.CompactValueMultiAsset ada ma rep) <- cVal ->
+        TxOutMA' (restructureAddr cAddr) ada ma rep
+    Alonzo.TxOutCompactDH cAddr cVal dh
+      | Mary.CompactValue (Mary.CompactValueAdaOnly ada) <- cVal ->
+        TxOutDH' (restructureAddr cAddr) ada dh
+      | Mary.CompactValue (Mary.CompactValueMultiAsset ada ma rep) <- cVal ->
+        TxOutMADH' (restructureAddr cAddr) ada ma rep dh
+  where
+    restructureAddr cAddr =
+      case decompactAddr cAddr of
+        AddrBootstrap _ -> AddrBoot' cAddr
+        Addr ni pc sr
+          | KeyHashObj kh <- pc -> AddrKeyHash' ni kh $ restructureStakeIx sr
+          | ScriptHashObj sh <- pc -> AddrScript' ni sh $ restructureStakeIx sr
+    restructureStakeIx =
+      \case
+        StakeRefBase (KeyHashObj kh) -> StakeKeyHash kh
+        StakeRefBase (ScriptHashObj sh) -> StakeCredScript sh
+        StakeRefPtr ptr -> StakePtr ptr
+        StakeRefNull -> StakeNull
+
 
 constructMassivUTxO ::
-  Vector (KV P B) (KVPair Int (Vector (KV S B) (KVPair (TxId C) (Alonzo.TxOut CurrentEra)))) ->
-  UTxOs
+     (Vector (KV S BN) (KVPair (TxId C) (IntMap.IntMap TxOut'))) -> UTxOs
 constructMassivUTxO (KVArray txIxs txOutVec) =
-  let !sharedKeyHashes = collectSharedKeys utxoNoSharing
+  let !sharedKeyHashes = collectSharedKeys txOutVec
       lookupKeyHashIx :: Shelley.KeyHash kr C -> Maybe Ix1
       lookupKeyHashIx kh =
         lookupIxSortedArray (Keys.asWitness kh) sharedKeyHashes
-      !utxoWithSharing =
-        KVArray txIxs $ A.compute $ A.map applySharing utxoNoSharing
-      applySharing (KVArray keys values) =
-        let !values' = A.compute $ A.map applyTxOutSharing values
-            applyTxOutSharing =
-              \case
-                TxOut' addr ada -> TxOut' (applyAddrSharing addr) ada
-                TxOutMA' addr ada ma rep -> TxOutMA' (applyAddrSharing addr) ada ma rep
-                TxOutDH' addr ada dh -> TxOutDH' (applyAddrSharing addr) ada dh
-                TxOutMADH' addr ada ma rep dh -> TxOutMADH' (applyAddrSharing addr) ada ma rep dh
-            applyStakeSharing =
-              \case
-                StakeKeyHash skh
-                  | Just skhix <- lookupKeyHashIx skh -> StakeKeyIx skhix
-                s -> s
-            applyAddrSharing =
-              \case
-                AddrKeyIx' ni khix s -> AddrKeyIx' ni khix $ applyStakeSharing s
-                AddrScript' ni sh s -> AddrScript' ni sh $ applyStakeSharing s
-                AddrKeyHash' ni kh s
-                  | Just khix <- lookupKeyHashIx kh ->
-                    AddrKeyIx' ni khix $ applyStakeSharing s
-                  | otherwise -> AddrKeyHash' ni kh $ applyStakeSharing s
-                addr -> addr
-         in KVArray keys values'
-      !utxoNoSharing = A.compute $ A.map applyRestructure txOutVec
-      applyRestructure ::
-           Vector (KV S B) (KVPair (TxId C) (Alonzo.TxOut CurrentEra))
-        -> Vector (KV S BN) (KVPair (TxId C) TxOut')
-      applyRestructure (KVArray txIds txOuts) =
-        let !txOuts' = A.compute $ A.map restructureTxOut txOuts
-            restructureTxOut :: Alonzo.TxOut CurrentEra -> TxOut'
-            restructureTxOut =
-              \case
-                Alonzo.TxOutCompact cAddr cVal
-                  | Mary.CompactValue (Mary.CompactValueAdaOnly ada) <- cVal ->
-                    TxOut' (restructureAddr cAddr) ada
-                  | Mary.CompactValue (Mary.CompactValueMultiAsset ada ma rep) <- cVal ->
-                    TxOutMA' (restructureAddr cAddr) ada ma rep
-                Alonzo.TxOutCompactDH cAddr cVal dh
-                  | Mary.CompactValue (Mary.CompactValueAdaOnly ada) <- cVal ->
-                    TxOutDH' (restructureAddr cAddr) ada dh
-                  | Mary.CompactValue (Mary.CompactValueMultiAsset ada ma rep) <- cVal ->
-                    TxOutMADH' (restructureAddr cAddr) ada ma rep dh
-            restructureAddr cAddr =
-              case decompactAddr cAddr of
-                AddrBootstrap _ -> AddrBoot' cAddr
-                Addr ni pc sr
-                  | KeyHashObj kh <- pc ->
-                    AddrKeyHash' ni kh $ restructureStakeIx sr
-                  | ScriptHashObj sh <- pc ->
-                    AddrScript' ni sh $ restructureStakeIx sr
-            restructureStakeIx =
-              \case
-                StakeRefBase (KeyHashObj kh) -> StakeKeyHash kh
-                StakeRefBase (ScriptHashObj sh) -> StakeCredScript sh
-                StakeRefPtr ptr -> StakePtr ptr
-                StakeRefNull -> StakeNull
-         in KVArray txIds txOuts'
+      !utxoWithSharing = KVArray (A.clone txIxs) $ A.compute $ A.map (fmap applyTxOutSharing) txOutVec
+      applyTxOutSharing =
+        \case
+          TxOut' addr ada -> TxOut' (applyAddrSharing addr) ada
+          TxOutMA' addr ada ma rep ->
+            TxOutMA' (applyAddrSharing addr) ada ma rep
+          TxOutDH' addr ada dh -> TxOutDH' (applyAddrSharing addr) ada dh
+          TxOutMADH' addr ada ma rep dh ->
+            TxOutMADH' (applyAddrSharing addr) ada ma rep dh
+        where
+          applyStakeSharing =
+            \case
+              StakeKeyHash skh
+                | Just skhix <- lookupKeyHashIx skh -> StakeKeyIx skhix
+              s -> s
+          applyAddrSharing =
+            \case
+              AddrKeyIx' ni khix s -> AddrKeyIx' ni khix $ applyStakeSharing s
+              AddrScript' ni sh s -> AddrScript' ni sh $ applyStakeSharing s
+              AddrKeyHash' ni kh s
+                | Just khix <- lookupKeyHashIx kh ->
+                  AddrKeyIx' ni khix $ applyStakeSharing s
+                | otherwise -> AddrKeyHash' ni kh $ applyStakeSharing s
+              addr -> addr
    in UTxOs {utxoMap = utxoWithSharing, utxoSharedKeyHashes = sharedKeyHashes}
 
 deriving instance Storable (TxId C)
@@ -234,26 +226,24 @@ instance NFData TxOut' where
     TxOutMADH' a !_ !_ !_ dh -> a `deepseq` rnf dh
 
 groupOn ::
-     (Source r' e, Manifest rk k, Manifest rv v, Eq k, Monoid v)
-  => (e -> KVPair k v)
-  -> (k -> k -> Bool)
-  -> Vector r' e
+     (Source r' (KVPair k v), Manifest rk k, Manifest rv v, Eq k, Monoid v)
+  => Vector r' (KVPair k v)
   -> Vector (KV rk rv) (KVPair k v)
-groupOn toKV eq vec
-  | isEmpty vec = A.compute (A.empty @DL)
-  | otherwise =
-    let collectForward (i, kv@(KVPair key val)) =
-          let !kv'@(KVPair key' val') = toKV $ unsafeLinearIndex vec i
-           in if key' `eq` key
-              then collectForward (i + 1, KVPair key (val <> val'))
-              else Just (kv, (i + 1, kv'))
-    in compute (sunfoldrN (size vec) collectForward (1, toKV $ unsafeLinearIndex vec 0))
+groupOn vec =
+  let collectForward (i, mkv) = do
+        kv@(KVPair key val) <- mkv
+        case evaluateM vec i of
+          Nothing -> Just (kv, (i + 1, Nothing))
+          Just kv'@(KVPair key' val')
+            | key' == key -> collectForward (i + 1, Just (KVPair key (val <> val')))
+            | otherwise -> Just (kv, (i + 1, Just kv'))
+   in compute (sunfoldrN (size vec) collectForward (1, Just $ unsafeLinearIndex vec 0))
 
 
 -- (Vector (KV P BN) (KVPair Int (Vector (KV S BN) (KVPair (TxId C) TxOut')))),
 data UTxOs = UTxOs
-  { --utxoMap :: !(Vector (KV S BN) (KVPair (TxId C) (IntMap.IntMap TxOut'))),
-    utxoMap :: !(Vector (KV P BN) (KVPair Int (Vector (KV S BN) (KVPair (TxId C) TxOut')))),
+  { utxoMap :: !(Vector (KV S BN) (KVPair (TxId C) (IntMap.IntMap TxOut'))),
+    --utxoMap :: !(Vector (KV P BN) (KVPair Int (Vector (KV S BN) (KVPair (TxId C) TxOut')))),
     -- | Set of all key hashes and their usage counter.
     utxoSharedKeyHashes :: !(Vector S (Keys.KeyHash 'Shelley.Witness C))
   }
@@ -264,7 +254,7 @@ instance NFData UTxOs where
 lookupUTxOs :: TxIn C -> UTxOs -> Maybe (Alonzo.TxOut CurrentEra)
 lookupUTxOs (TxIn txId txIx) UTxOs {..} = do
   txOut' <-
-    lookupSortedKVArray txId =<< lookupSortedKVArray (fromIntegral txIx) utxoMap
+    IntMap.lookup (fromIntegral txIx) =<< lookupSortedKVArray txId utxoMap
   let toStakeRef =
         \case
           StakeKeyIx ix -> StakeRefBase <$> lookupCredential ix
@@ -316,17 +306,11 @@ printStats utxo@UTxOs {..} = do
       , "Number of unique txIxs: " <> show (A.elemsCount utxoMap)
       , "Total shared keys found: " <> show (countSharedKeys utxo)
       ]
-  A.mapM_ printUTxO $ utxoMap
-  where
-    printUTxO :: KVPair Int (Vector (KV S BN) (KVPair (TxId C) TxOut')) -> IO ()
-    printUTxO (KVPair txIx v) =
-      putStrLn $
-      "<TxIx: " <> show txIx <> "> - TxOuts: " <> show (A.elemsCount v)
 
 countSharedKeys :: UTxOs -> Int
 countSharedKeys UTxOs {..} = foldlS countOuter 0 $ valsArray utxoMap
   where
-    countOuter acc (KVArray _ vs) = foldlS countInner acc vs
+    countOuter acc vs = F.foldl' countInner acc vs
     countInner acc =
       \case
         TxOut' addr' _ -> acc + countAddr' addr'
@@ -405,6 +389,9 @@ data instance Array (KV kr vr) ix e = KVArray
   { keysArray :: !(Array kr ix (KVKey e)),
     valsArray :: !(Array vr ix (KVValue e))
   }
+
+instance (NFData k, NFData v) => NFData (KVPair k v) where
+  rnf (KVPair k v) = k `deepseq` v `deepseq` ()
 
 instance (NFData (Array kr ix k), (NFData (Array kv ix v))) =>
          NFData (Array (KV kr kv) ix (KVPair k v)) where
