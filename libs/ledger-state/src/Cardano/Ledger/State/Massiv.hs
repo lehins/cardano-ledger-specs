@@ -233,9 +233,27 @@ instance NFData TxOut' where
     TxOutDH' a !_ dh -> a `deepseq` rnf dh
     TxOutMADH' a !_ !_ !_ dh -> a `deepseq` rnf dh
 
+groupOn ::
+     (Source r' e, Manifest rk k, Manifest rv v, Eq k, Monoid v)
+  => (e -> KVPair k v)
+  -> (k -> k -> Bool)
+  -> Vector r' e
+  -> Vector (KV rk rv) (KVPair k v)
+groupOn toKV eq vec
+  | isEmpty vec = A.compute (A.empty @DL)
+  | otherwise =
+    let collectForward (i, kv@(KVPair key val)) =
+          let !kv'@(KVPair key' val') = toKV $ unsafeLinearIndex vec i
+           in if key' `eq` key
+              then collectForward (i + 1, KVPair key (val <> val'))
+              else Just (kv, (i + 1, kv'))
+    in compute (sunfoldrN (size vec) collectForward (1, toKV $ unsafeLinearIndex vec 0))
 
+
+-- (Vector (KV P BN) (KVPair Int (Vector (KV S BN) (KVPair (TxId C) TxOut')))),
 data UTxOs = UTxOs
-  { utxoMap :: !(Vector (KV P BN) (KVPair Int (Vector (KV S BN) (KVPair (TxId C) TxOut')))),
+  { --utxoMap :: !(Vector (KV S BN) (KVPair (TxId C) (IntMap.IntMap TxOut'))),
+    utxoMap :: !(Vector (KV P BN) (KVPair Int (Vector (KV S BN) (KVPair (TxId C) TxOut')))),
     -- | Set of all key hashes and their usage counter.
     utxoSharedKeyHashes :: !(Vector S (Keys.KeyHash 'Shelley.Witness C))
   }
