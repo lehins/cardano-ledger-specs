@@ -109,7 +109,7 @@ import Cardano.Ledger.Credential
     Ptr (..),
     StakeCredential,
   )
-import qualified Cardano.Ledger.Crypto as CC (ADDRHASH, Crypto)
+import qualified Cardano.Ledger.Crypto as CC (ADDRHASH, HASH, Crypto)
 import Cardano.Ledger.Era
 import Cardano.Ledger.Hashes (EraIndependentTxBody, ScriptHash)
 import Cardano.Ledger.Keys
@@ -200,12 +200,14 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Text.Encoding as Text
 import Data.Typeable (Typeable)
-import Data.Word (Word64, Word8)
+import Data.Word (Word64, Word32, Word8)
+import Foreign.Storable
 import GHC.Generics (Generic)
 import GHC.Records
 import NoThunks.Class (AllowThunksIn (..), InspectHeapNamed (..), NoThunks (..))
 import Numeric.Natural (Natural)
 import Quiet
+import Foreign.Ptr (castPtr)
 
 -- ========================================================================
 
@@ -430,8 +432,27 @@ deriving newtype instance CC.Crypto crypto => FromCBOR (TxId crypto)
 
 deriving newtype instance CC.Crypto crypto => NFData (TxId crypto)
 
+deriving newtype instance HS.HashAlgorithm (CC.HASH crypto) => Storable (TxId crypto)
+
 instance HeapWords (TxIn crypto) where
   heapWords (TxInCompact txid ix) = 3 + HW.heapWordsUnpacked txid + HW.heapWordsUnpacked ix
+
+type TxIxCompact = Word32
+
+instance HS.HashAlgorithm (CC.HASH crypto) => Storable (TxIn crypto) where
+  sizeOf _ =
+    sizeOf (undefined :: SafeHash crypto EraIndependentTxBody)
+      + sizeOf (undefined :: TxIxCompact)
+  alignment _ =
+    alignment (undefined :: SafeHash crypto EraIndependentTxBody)
+      + alignment (undefined :: TxIxCompact)
+  peek ptr = do
+    txId <- peek (castPtr ptr)
+    txIx :: TxIxCompact <- peekByteOff ptr (sizeOf txId)
+    pure $ TxInCompact txId (fromIntegral txIx)
+  poke ptr (TxInCompact txId txIx) = do
+    poke (castPtr ptr) txId
+    pokeByteOff ptr (sizeOf txId) (fromIntegral txIx :: TxIxCompact)
 
 type TransTxId (c :: Type -> Constraint) era =
   -- Transaction Ids are the hash of a transaction body, which contains
