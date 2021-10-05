@@ -5,6 +5,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -fno-warn-orphans -funbox-strict-fields #-}
 
 module Cardano.Ledger.State.UTxO where
@@ -320,6 +321,29 @@ loadUTxOni fp = foldlUTxO fp nestedInsert mempty
     nestedInsert !m (TxIn txId txIx, !v) =
       let !e = Map.singleton txId v
        in IntMap.insertWith (<>) (fromIntegral txIx) e m
+
+type NMap a = IntMap.IntMap (IntMap.IntMap (IntMap.IntMap (IntMap.IntMap (IntMap.IntMap a))))
+
+loadUTxOnested :: FilePath -> IO (NMap (Alonzo.TxOut CurrentEra))
+loadUTxOnested fp = foldlUTxO fp nestedInsert mempty
+  where
+    nestedInsert ::
+         NMap (Alonzo.TxOut CurrentEra)
+      -> (TxIn C, Alonzo.TxOut CurrentEra)
+      -> NMap (Alonzo.TxOut CurrentEra)
+    nestedInsert !m (TxInCompact32 a b c d txIx, !txOut) =
+      let s =
+            IntMap.singleton (fromIntegral txIx) $!
+            IntMap.singleton (fromIntegral a) $!
+            IntMap.singleton (fromIntegral b) $!
+            IntMap.singleton (fromIntegral c) $!
+            IntMap.singleton (fromIntegral d) txOut
+       in mergeNested s m
+    nestedInsert _ _ = error "Invalid size hash"
+
+mergeNested :: NMap a -> NMap a -> NMap a
+mergeNested = IntMap.unionWith (IntMap.unionWith (IntMap.unionWith (IntMap.unionWith IntMap.union)))
+--insertIntMap i = IntMap.insertWith (<>) (fromIntegral w)
 
 totalADA :: Map.Map (TxIn C) (Alonzo.TxOut CurrentEra) -> Mary.Value C
 totalADA = foldMap (\(Alonzo.TxOut _ v _) -> v)
