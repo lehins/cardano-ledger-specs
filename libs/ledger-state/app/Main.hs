@@ -53,7 +53,7 @@ main = do
         (header "ledger-state - Tool for analyzing ledger state")
   forM_ (optsLedgerStateBinaryFile opts) $ \fp -> do
     ls <- loadLedgerState fp
-    printNewEpochStateStats $ countNewEpochStateStats ls
+    printNewEpochStateStats =<< countNewEpochStateStats ls
   forM_ (optsUtxoJsonFile opts) $ \fp -> do
     _ <- observeMemoryOriginalMap fp
     pure ()
@@ -71,16 +71,17 @@ observeMemoryOriginalMap fp = do
   performGC
   _ <- getChar
   writeIORef ref $ Just utxo -- ensure utxo doesn't get GCed
+  -- forM_ (IntMap.toList utxo) $ \(i, hm) -> do
+    -- print some stats.
   pure ref
 
-observeMemory :: FilePath -> IO (IORef (Maybe UTxOs))
+--observeMemory :: FilePath -> IO (IORef (Maybe UTxOs))
 observeMemory fp = do
   ref <- newIORef Nothing
   utxo <- loadMassivUTxO fp
   utxo `seq` putStrLn "Loaded"
   performGC
   _ <- getChar
-  printStats utxo
   writeIORef ref $ Just utxo -- ensure utxo doesn't get GCed
   pure ref
 

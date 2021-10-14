@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -11,11 +12,6 @@
 
 module Cardano.Ledger.State.UTxO where
 
-import Cardano.Prelude (HeapWords(..))
-import qualified Cardano.Crypto.Hash.Class as HS
-import qualified Data.Hashable as HM
-import qualified Data.HashMap.Strict as HM
-import Cardano.Ledger.TxIn
 import qualified Cardano.Address as A
 import qualified Cardano.Address.Style.Byron as AB
 import qualified Cardano.Address.Style.Icarus as AI
@@ -23,6 +19,7 @@ import qualified Cardano.Address.Style.Shelley as AS
 import Cardano.Binary (FromCBOR (..))
 import qualified Cardano.Chain.Common as Byron
 import qualified Cardano.Crypto.Hash.Class as H
+import qualified Cardano.Crypto.Hash.Class as HS
 import qualified Cardano.Crypto.Hashing as Byron
 import Cardano.Ledger.Address
 import Cardano.Ledger.Alonzo
@@ -40,6 +37,8 @@ import Cardano.Ledger.Shelley.API
 import Cardano.Ledger.Shelley.EpochBoundary
 import Cardano.Ledger.Shelley.LedgerState
 import Cardano.Ledger.Shelley.Rewards
+import Cardano.Ledger.TxIn
+import Cardano.Prelude (HeapWords (..))
 import Cardano.Protocol.TPraos (individualPoolStakeVrf)
 import Codec.CBOR.Read (deserialiseFromBytes)
 import Conduit
@@ -54,22 +53,29 @@ import qualified Data.Attoparsec.ByteString.Char8 as Atto8
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Lazy as LBS
+import Data.Compact.KeyMap as KeyMap hiding (Stat)
 import Data.Conduit.Attoparsec
 import qualified Data.Conduit.List as C
 import Data.Foldable as F
 import Data.Functor
+import qualified Data.HashMap.Strict as HM
+import qualified Data.Hashable as HM
+import Data.IORef
 import qualified Data.IntMap.Strict as IntMap
+import Data.List (nub)
 import qualified Data.Map.Strict as Map
 import Data.Proxy
 import qualified Data.Set as Set
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Read as T
+import Data.Time.Clock
 import Data.Typeable
+import GHC.StableName
 import Numeric.Natural
 import Prettyprinter
+import System.IO.Unsafe
 import Text.Printf
-import Data.Compact.KeyMap as KeyMap hiding (Stat)
 
 type C = StandardCrypto
 
@@ -344,9 +350,9 @@ loadUTxOn :: FilePath -> IO (Map.Map (TxId C) (IntMap.IntMap (Alonzo.TxOut Curre
 loadUTxOn fp = foldlUTxO fp txIdNestedInsert mempty
 
 txIdNestedInsert ::
-     (Map.Map (TxId C) (IntMap.IntMap (Alonzo.TxOut CurrentEra)))
-  -> (TxIn C, Alonzo.TxOut CurrentEra)
-  -> (Map.Map (TxId C) (IntMap.IntMap (Alonzo.TxOut CurrentEra)))
+  (Map.Map (TxId C) (IntMap.IntMap (Alonzo.TxOut CurrentEra))) ->
+  (TxIn C, Alonzo.TxOut CurrentEra) ->
+  (Map.Map (TxId C) (IntMap.IntMap (Alonzo.TxOut CurrentEra)))
 txIdNestedInsert !m (TxIn !txId !txIx, !v) =
   let !e = IntMap.singleton (fromIntegral txIx) v
    in Map.insertWith (<>) txId e m
@@ -365,9 +371,9 @@ loadUTxOhm :: FilePath -> IO (IntMap.IntMap (KeyMap.HashMap (Alonzo.TxOut Curren
 loadUTxOhm fp = foldlUTxO fp nestedInsert mempty
   where
     nestedInsert ::
-         IntMap.IntMap (KeyMap.HashMap (Alonzo.TxOut CurrentEra))
-      -> (TxIn C, Alonzo.TxOut CurrentEra)
-      -> IntMap.IntMap (KeyMap.HashMap (Alonzo.TxOut CurrentEra))
+      IntMap.IntMap (KeyMap.HashMap (Alonzo.TxOut CurrentEra)) ->
+      (TxIn C, Alonzo.TxOut CurrentEra) ->
+      IntMap.IntMap (KeyMap.HashMap (Alonzo.TxOut CurrentEra))
     nestedInsert !m (TxInCompact32 x1 x2 x3 x4 txIx, !v) =
       let !key = KeyMap.Key x1 x2 x3 x4
           f =
@@ -390,25 +396,22 @@ hashTxId (TxId sh) =
     HS.ViewHashNot32 -> error "irrelevant"
     HS.ViewHash32 a _ _ _ -> fromIntegral a
 
-
 loadUTxOuhm' :: FilePath -> IO (HM.HashMap (TxIn C) ())
 loadUTxOuhm' fp = foldlUTxO fp (\ !m !(!k, _) -> HM.insert k () m) mempty
-
 
 loadUTxOuhm'' :: FilePath -> IO (IntMap.IntMap (HM.HashMap (TxId C) ()))
 loadUTxOuhm'' fp = foldlUTxO fp nestedInsert mempty
   where
     nestedInsert ::
-         IntMap.IntMap (HM.HashMap (TxId C) ())
-      -> (TxIn C, Alonzo.TxOut CurrentEra)
-      -> IntMap.IntMap (HM.HashMap (TxId C) ())
+      IntMap.IntMap (HM.HashMap (TxId C) ()) ->
+      (TxIn C, Alonzo.TxOut CurrentEra) ->
+      IntMap.IntMap (HM.HashMap (TxId C) ())
     nestedInsert !m (TxIn txId txIx, _) =
       let f =
             \case
               Nothing -> Just $! HM.singleton txId ()
               Just hm -> Just $! HM.insert txId () hm
        in IntMap.alter f (fromIntegral txIx) m
-
 
 loadUTxO' :: FilePath -> IO (Map.Map (TxIn C) ())
 loadUTxO' fp = foldlUTxO fp (\ !m !(!k, _) -> Map.insert k () m) mempty
@@ -417,9 +420,9 @@ loadUTxOni' :: FilePath -> IO (IntMap.IntMap (Map.Map (TxId C) ()))
 loadUTxOni' fp = foldlUTxO fp nestedInsertTxId' mempty
 
 nestedInsertTxId' ::
-     (IntMap.IntMap (Map.Map (TxId C) ()))
-  -> (TxIn C, Alonzo.TxOut CurrentEra)
-  -> (IntMap.IntMap (Map.Map (TxId C) ()))
+  (IntMap.IntMap (Map.Map (TxId C) ())) ->
+  (TxIn C, Alonzo.TxOut CurrentEra) ->
+  (IntMap.IntMap (Map.Map (TxId C) ()))
 nestedInsertTxId' !im (TxIn !txId !txIx, _) =
   let f =
         \case
@@ -434,9 +437,9 @@ loadUTxOhm' :: FilePath -> IO (IntMap.IntMap (KeyMap.HashMap ()))
 loadUTxOhm' fp = foldlUTxO fp nestedInsert mempty
   where
     nestedInsert ::
-         IntMap.IntMap (KeyMap.HashMap ())
-      -> (TxIn C, Alonzo.TxOut CurrentEra)
-      -> IntMap.IntMap (KeyMap.HashMap ())
+      IntMap.IntMap (KeyMap.HashMap ()) ->
+      (TxIn C, Alonzo.TxOut CurrentEra) ->
+      IntMap.IntMap (KeyMap.HashMap ())
     nestedInsert !m (TxInCompact32 x1 x2 x3 x4 txIx, _) =
       let !key = KeyMap.Key x1 x2 x3 x4
           f =
@@ -445,14 +448,13 @@ loadUTxOhm' fp = foldlUTxO fp nestedInsert mempty
               Just hm -> Just $! KeyMap.insert key () hm
        in IntMap.alter f (fromIntegral txIx) m
 
-
 loadUTxOihm' :: FilePath -> IO (KeyMap.HashMap (IntMap.IntMap ()))
 loadUTxOihm' fp = foldlUTxO fp nestedInsert KeyMap.Empty
   where
     nestedInsert ::
-         KeyMap.HashMap (IntMap.IntMap ())
-      -> (TxIn C, Alonzo.TxOut CurrentEra)
-      -> KeyMap.HashMap (IntMap.IntMap ())
+      KeyMap.HashMap (IntMap.IntMap ()) ->
+      (TxIn C, Alonzo.TxOut CurrentEra) ->
+      KeyMap.HashMap (IntMap.IntMap ())
     nestedInsert !hm (TxInCompact32 x1 x2 x3 x4 txIx, _) =
       let !key = KeyMap.Key x1 x2 x3 x4
           f =
@@ -477,7 +479,8 @@ loadBinUTxO :: FilePath -> IO (UTxO CurrentEra)
 loadBinUTxO fp = do
   ls <- loadLedgerState fp
   pure $! _utxo $ _utxoState $ esLState $ nesEs ls
-  -- runConduit $ C.sourceList (Map.toList u) .| collectStats
+
+-- runConduit $ C.sourceList (Map.toList u) .| collectStats
 
 collectStats :: ConduitT (TxIn C, Alonzo.TxOut CurrentEra) Void IO ()
 collectStats = do
@@ -558,14 +561,35 @@ newtype Count = Count Int
 
 data Stat k = Stat
   { statUnique :: !(Set.Set k),
-    statCount :: !Count
+    statCount :: !Count,
+    statStableNames :: ![StableName k]
   }
 
 instance Ord k => Semigroup (Stat k) where
-  (<>) s1 s2 = Stat (statUnique s1 <> statUnique s2) (statCount s1 + statCount s2)
+  (<>) s1 s2 =
+    Stat
+      (statUnique s1 <> statUnique s2)
+      (statCount s1 + statCount s2)
+      (statStableNames s1 <> statStableNames s2)
+
+-- | concat two lists of nubs. order of elements is not preserved
+nubAppend :: Eq a => [a] -> [a] -> [a]
+nubAppend [x] ys =
+  if x `elem` ys
+    then ys
+    else x : ys
+nubAppend xs [y] =
+  if y `elem` xs
+    then xs
+    else y : xs
+nubAppend xs ys
+  | xsl < ysl = filter (`notElem` ys) xs <> ys
+  | otherwise  = filter (`notElem` xs) ys <> xs
+  where xsl = length xs
+        ysl = length ys
 
 instance Ord k => Monoid (Stat k) where
-  mempty = Stat mempty 0
+  mempty = Stat mempty 0 []
 
 instance Pretty (Stat k) where
   pretty Stat {..} =
@@ -573,7 +597,9 @@ instance Pretty (Stat k) where
       <+> "/"
       <+> pretty statCount
       <+> "(" <> pretty (intPercent n statCount) <> " unique)"
+      <+> "(" <> pretty (intPercent k statCount) <> " shared)"
     where
+      k = length statStableNames
       n = Set.size statUnique
 
 data Percent = Percent Int Int
@@ -586,17 +612,33 @@ intPercent x y
   | y == 0 = Percent 0 0
   | otherwise = uncurry Percent (((10000 * x) `div` fromIntegral y) `quotRem` 100)
 
-statSingleton :: a -> Stat a
-statSingleton a = Stat (Set.singleton a) 1
+statSingleton :: a -> IO (Stat a)
+statSingleton a = Stat (Set.singleton a) 1 . pure <$> makeStableName a
 
-statSet :: Set.Set a -> Stat a
-statSet s = Stat s (Count (Set.size s))
+statSet :: Set.Set a -> IO (Stat a)
+statSet s = Stat s (Count (Set.size s)) <$> mapM makeStableName (Set.toList s)
 
-statMapKeys :: Map.Map k v -> Stat k
+statMapKeys :: Map.Map k v -> IO (Stat k)
 statMapKeys = statSet . Map.keysSet
 
-statFoldable :: (Ord a, Foldable t) => t a -> Stat a
-statFoldable m = Stat (Set.fromList (F.toList m)) (Count (F.length m))
+statFoldable :: (Ord a, Foldable t) => t a -> IO (Stat a)
+statFoldable m =
+  let xs = F.toList m
+   in Stat (Set.fromList xs) (Count (F.length m))
+        <$> mapM makeStableName xs
+
+foldMapM ::
+  (Monad m, Monoid w, Foldable t) =>
+  (a -> m w) ->
+  t a ->
+  m w
+foldMapM f =
+  foldlM
+    ( \acc a -> do
+        w <- f a
+        return $! mappend acc w
+    )
+    mempty
 
 prettyRecord :: Doc ann -> [Doc ann] -> Doc ann
 prettyRecord h content = h <> ":" <+> line <> indent 2 (vsep content)
@@ -645,15 +687,14 @@ instance AggregateStat SnapShotStats where
         gsKeyHashStakePool = sssDelegationStakePool <> sssPoolParams
       }
 
-countSnapShotStat :: SnapShot C -> SnapShotStats
-countSnapShotStat SnapShot {..} =
-  SnapShotStats
-    { sssStake = statMapKeys (unStake _stake),
-      sssDelegationCredential = statMapKeys _delegations,
-      sssDelegationStakePool = statFoldable _delegations,
-      sssPoolParams = statMapKeys _poolParams,
-      sssPoolParamsStats = foldMap countPoolParamsStats _poolParams
-    }
+countSnapShotStat :: SnapShot C -> IO SnapShotStats
+countSnapShotStat SnapShot {..} = do
+  sssStake <- statMapKeys (unStake _stake)
+  sssDelegationCredential <- statMapKeys _delegations
+  sssDelegationStakePool <- statFoldable _delegations
+  sssPoolParams <- statMapKeys _poolParams
+  sssPoolParamsStats <- foldMapM countPoolParamsStats _poolParams
+  pure SnapShotStats {..}
 
 data PoolParamsStats = PoolParamsStats
   { ppsPoolId :: !(Stat (KeyHash 'StakePool C)),
@@ -684,13 +725,12 @@ instance AggregateStat PoolParamsStats where
   aggregateStat PoolParamsStats {..} =
     mempty {gsCredentialStaking = ppsRewardAcnt, gsKeyHashStakePool = ppsPoolId}
 
-countPoolParamsStats :: PoolParams C -> PoolParamsStats
-countPoolParamsStats PoolParams {..} =
-  PoolParamsStats
-    { ppsPoolId = statSingleton _poolId,
-      ppsRewardAcnt = statSingleton (getRwdCred _poolRAcnt),
-      ppsOwners = statSet _poolOwners
-    }
+countPoolParamsStats :: PoolParams C -> IO PoolParamsStats
+countPoolParamsStats PoolParams {..} = do
+  ppsPoolId <- statSingleton _poolId
+  ppsRewardAcnt <- statSingleton (getRwdCred _poolRAcnt)
+  ppsOwners <- statSet _poolOwners
+  pure PoolParamsStats {..}
 
 data RewardUpdateStats = RewardUpdateStats
 
@@ -721,12 +761,11 @@ instance AggregateStat PoolDistrStats where
         gsVerKeyVRF = pdsStakePoolStakeVrf
       }
 
-calcPoolDistrStats :: PoolDistr C -> PoolDistrStats
-calcPoolDistrStats (PoolDistr pd) =
-  PoolDistrStats
-    { pdsStakePoolKeyHash = statMapKeys pd,
-      pdsStakePoolStakeVrf = statFoldable (individualPoolStakeVrf <$> Map.elems pd)
-    }
+calcPoolDistrStats :: PoolDistr C -> IO PoolDistrStats
+calcPoolDistrStats (PoolDistr pd) = do
+  pdsStakePoolKeyHash <- statMapKeys pd
+  pdsStakePoolStakeVrf <- statFoldable (individualPoolStakeVrf <$> Map.elems pd)
+  pure PoolDistrStats {..}
 
 data NewEpochStateStats = NewEpochStateStats
   { nessPrevBlocksMade :: !(Stat (KeyHash 'StakePool C)),
@@ -751,28 +790,30 @@ instance Pretty NewEpochStateStats where
         pretty nessAggregateStats
       ]
 
-countNewEpochStateStats :: NewEpochState CurrentEra -> NewEpochStateStats
+countNewEpochStateStats :: NewEpochState CurrentEra -> IO NewEpochStateStats
 countNewEpochStateStats NewEpochState {..} =
-  let ness =
-        NewEpochStateStats
-          { nessPrevBlocksMade = statMapKeys (unBlocksMade nesBprev),
-            nessCurBlocksMade = statMapKeys (unBlocksMade nesBcur),
-            nessBlocksMade = mempty,
-            nessEpochStateStats = countEpochStateStats nesEs,
-            nessRewardUpdate = RewardUpdateStats,
-            nessPoolDistrStats = calcPoolDistrStats nesPd,
-            nessAggregateStats = mempty
-          }
-   in ness
-        { nessBlocksMade = nessPrevBlocksMade ness <> nessCurBlocksMade ness,
+  prevRef `seq` do
+    nessPrevBlocksMade <- statMapKeys (unBlocksMade nesBprev)
+    logProgress "nessPrevBlocksMade"
+    nessCurBlocksMade <- statMapKeys (unBlocksMade nesBcur)
+    logProgress "nessCurBlocksMade"
+    nessEpochStateStats <- countEpochStateStats nesEs
+    nessRewardUpdate <- pure RewardUpdateStats
+    logProgress "nessRewardUpdate"
+    nessPoolDistrStats <- calcPoolDistrStats nesPd
+    logProgress "nessPoolDistrStats"
+    pure
+      NewEpochStateStats
+        { nessBlocksMade = nessPrevBlocksMade <> nessCurBlocksMade,
           nessAggregateStats =
             mconcat
-              [ aggregateStat (nessPrevBlocksMade ness),
-                aggregateStat (nessCurBlocksMade ness),
-                aggregateStat (nessRewardUpdate ness),
-                essAggregateStats (nessEpochStateStats ness),
-                aggregateStat (nessPoolDistrStats ness)
-              ]
+              [ aggregateStat nessPrevBlocksMade,
+                aggregateStat nessCurBlocksMade,
+                aggregateStat nessRewardUpdate,
+                essAggregateStats nessEpochStateStats,
+                aggregateStat nessPoolDistrStats
+              ],
+          ..
         }
 
 printNewEpochStateStats :: NewEpochStateStats -> IO ()
@@ -801,29 +842,40 @@ instance Pretty EpochStateStats where
         pretty essAggregateStats
       ]
 
-countEpochStateStats :: EpochState CurrentEra -> EpochStateStats
-countEpochStateStats EpochState {..} =
-  let mark = countSnapShotStat (_pstakeMark esSnapshots)
-      set = countSnapShotStat (_pstakeSet esSnapshots)
-      go = countSnapShotStat (_pstakeGo esSnapshots)
-      stats =
-        EpochStateStats
-          { essMarkSnapShotStats = mark,
-            essSetSnapShotStats = set,
-            essGoSnapShotStats = go,
-            essSnapShotsStats = mark <> set <> go,
-            essLedgerStateStats = countLedgerStateStats esLState,
-            essNonMyopic = statMapKeys (likelihoodsNM esNonMyopic),
-            essAggregateStats = mempty
-          }
-   in stats
-        { essAggregateStats =
-            mconcat
-              [ aggregateStat (essSnapShotsStats stats),
-                aggregateStat (essLedgerStateStats stats),
-                aggregateStat (essNonMyopic stats)
-              ]
-        }
+prevRef :: IORef UTCTime
+prevRef = unsafePerformIO $ getCurrentTime >>= newIORef
+{-# NOINLINE prevRef #-}
+
+logProgress :: String -> IO ()
+logProgress n = do
+  start <- readIORef prevRef
+  end <- getCurrentTime
+  putStrLn $ "[" ++ show (diffUTCTime end start) ++ "] Calculated " ++ n
+  writeIORef prevRef end
+
+countEpochStateStats :: EpochState CurrentEra -> IO EpochStateStats
+countEpochStateStats EpochState {..} = do
+  essMarkSnapShotStats <- countSnapShotStat (_pstakeMark esSnapshots)
+  logProgress "essMarkSnapShotStats"
+  essSetSnapShotStats <- countSnapShotStat (_pstakeSet esSnapshots)
+  logProgress "essSetSnapShotStats"
+  essGoSnapShotStats <- countSnapShotStat (_pstakeGo esSnapshots)
+  logProgress "essGoSnapShotStats"
+  let essSnapShotsStats = essMarkSnapShotStats <> essSetSnapShotStats <> essGoSnapShotStats
+  essLedgerStateStats <- countLedgerStateStats esLState
+  logProgress "essLedgerStateStats"
+  essNonMyopic <- statMapKeys (likelihoodsNM esNonMyopic)
+  logProgress "essNonMyopic"
+  pure
+    EpochStateStats
+      { essAggregateStats =
+          mconcat
+            [ aggregateStat essSnapShotsStats,
+              aggregateStat essLedgerStateStats,
+              aggregateStat essNonMyopic
+            ],
+        ..
+      }
 
 data DStateStats = DStateStats
   { dssCredentialStaking :: !(Stat (Credential 'Staking C)),
@@ -854,26 +906,32 @@ instance AggregateStat DStateStats where
         gsVerKeyVRF = dssHashVerKeyVRF
       }
 
-countDStateStats :: DState C -> DStateStats
-countDStateStats DState {..} =
-  DStateStats
-    { dssCredentialStaking =
-        statMapKeys _rewards
-          <> statMapKeys _delegations
-          <> statSet (range _ptrs),
-      dssDelegations = statFoldable _delegations,
-      dssKeyHashGenesis =
-        statFoldable (fGenDelegGenKeyHash <$> Map.keys _fGenDelegs)
-          <> statMapKeys (unGenDelegs _genDelegs),
-      dssKeyHashGenesisDelegate =
-        statFoldable (genDelegKeyHash <$> Map.elems _fGenDelegs)
-          <> statFoldable
-            (genDelegKeyHash <$> Map.elems (unGenDelegs _genDelegs)),
-      dssHashVerKeyVRF =
-        statFoldable (genDelegVrfHash <$> Map.elems _fGenDelegs)
-          <> statFoldable
-            (genDelegVrfHash <$> Map.elems (unGenDelegs _genDelegs))
-    }
+countDStateStats :: DState C -> IO DStateStats
+countDStateStats DState {..} = do
+  dssCredentialStaking <-
+    mconcat
+      <$> sequence
+        [statMapKeys _rewards, statMapKeys _delegations, statSet (range _ptrs)]
+  dssDelegations <- statFoldable _delegations
+  dssKeyHashGenesis <-
+    mconcat
+      <$> sequence
+        [ statFoldable (fGenDelegGenKeyHash <$> Map.keys _fGenDelegs),
+          statMapKeys (unGenDelegs _genDelegs)
+        ]
+  dssKeyHashGenesisDelegate <-
+    mconcat
+      <$> sequence
+        [ statFoldable (genDelegKeyHash <$> Map.elems _fGenDelegs),
+          statFoldable (genDelegKeyHash <$> Map.elems (unGenDelegs _genDelegs))
+        ]
+  dssHashVerKeyVRF <-
+    mconcat
+      <$> sequence
+        [ statFoldable (genDelegVrfHash <$> Map.elems _fGenDelegs),
+          statFoldable (genDelegVrfHash <$> Map.elems (unGenDelegs _genDelegs))
+        ]
+  pure DStateStats {..}
 
 data PStateStats = PStateStats
   { pssKeyHashStakePool :: !(Stat (KeyHash 'StakePool C)),
@@ -892,16 +950,19 @@ instance AggregateStat PStateStats where
   aggregateStat PStateStats {..} =
     (aggregateStat pssPoolParamsStats) {gsKeyHashStakePool = pssKeyHashStakePool}
 
-countPStateStats :: PState C -> PStateStats
-countPStateStats PState {..} =
-  PStateStats
-    { pssKeyHashStakePool =
-        statMapKeys _pParams
-          <> statMapKeys _fPParams
-          <> statMapKeys _retiring,
-      pssPoolParamsStats =
-        foldMap countPoolParamsStats _pParams <> foldMap countPoolParamsStats _fPParams
-    }
+countPStateStats :: PState C -> IO PStateStats
+countPStateStats PState {..} = do
+  pssKeyHashStakePool <-
+    mconcat
+      <$> sequence
+        [statMapKeys _pParams, statMapKeys _fPParams, statMapKeys _retiring]
+  pssPoolParamsStats <-
+    mconcat
+      <$> sequence
+        [ foldMap countPoolParamsStats _pParams,
+          foldMap countPoolParamsStats _fPParams
+        ]
+  pure PStateStats {..}
 
 data LedgerStateStats = LedgerStateStats
   { lssUTxOStats :: !UTxOStats,
@@ -926,13 +987,15 @@ instance AggregateStat LedgerStateStats where
         aggregateStat lssPStateStats
       ]
 
-countLedgerStateStats :: LedgerState CurrentEra -> LedgerStateStats
-countLedgerStateStats LedgerState {..} =
-  LedgerStateStats
-    { lssUTxOStats = countUTxOStats (_utxo _utxoState),
-      lssDStateStats = countDStateStats (_dstate _delegationState),
-      lssPStateStats = countPStateStats (_pstate _delegationState)
-    }
+countLedgerStateStats :: LedgerState CurrentEra -> IO LedgerStateStats
+countLedgerStateStats LedgerState {..} = do
+  lssUTxOStats <- countUTxOStats (_utxo _utxoState)
+  logProgress "lssUTxOStats"
+  lssDStateStats <- countDStateStats (_dstate _delegationState)
+  logProgress "lssDStateStats"
+  lssPStateStats <- countPStateStats (_pstate _delegationState)
+  logProgress "lssPStateStats"
+  pure LedgerStateStats {..}
 
 data TxInStats = TxInStats
   { tisTxId :: !(Stat (TxId C)),
@@ -943,14 +1006,10 @@ instance Pretty TxInStats where
   pretty TxInStats {..} =
     prettyRecord "TxInStats" ["TxId" <:> tisTxId, "TxIx" <:> tisTxIx]
 
-countTxInStats :: [TxIn C] -> TxInStats
+countTxInStats :: [TxIn C] -> IO TxInStats
 countTxInStats txIns =
   case unzip (fmap (\(TxIn txId txIx) -> (txId, txIx)) txIns) of
-    (txIds, txIxs) ->
-      TxInStats
-        { tisTxId = statFoldable txIds,
-          tisTxIx = statFoldable txIxs
-        }
+    (txIds, txIxs) -> TxInStats <$> statFoldable txIds <*> statFoldable txIxs
 
 data TxOutStats = TxOutStats
   { tosBootstrap :: !(Stat (BootstrapAddress C)),
@@ -1001,37 +1060,46 @@ instance Pretty TxOutStats where
 instance AggregateStat TxOutStats where
   aggregateStat TxOutStats {..} = aggregateStat tosStakingCredential
 
-countTxOutStats :: [Alonzo.TxOut CurrentEra] -> TxOutStats
-countTxOutStats = foldMap countTxOutStat
+countTxOutStats :: [Alonzo.TxOut CurrentEra] -> IO TxOutStats
+countTxOutStats = foldMapM countTxOutStat
   where
-    countTxOutStat :: Alonzo.TxOut CurrentEra -> TxOutStats
-    countTxOutStat (Alonzo.TxOut addr (Value v vm) mData) =
-      let !dataStat =
-            strictMaybe
-              mempty
-              (\d -> mempty {tosDataHash = statSingleton d})
-              mData
-          !vmElems = Map.elems vm
-          !valueStat =
-            dataStat
-              { tosValue = statSingleton v,
-                tosPolicyId = statMapKeys vm,
-                tosAssetName = foldMap statMapKeys vmElems,
-                tosAssetValue = foldMap statFoldable vmElems
+    countTxOutStat :: Alonzo.TxOut CurrentEra -> IO TxOutStats
+    countTxOutStat (Alonzo.TxOut addr (Value v vm) mData) = do
+      tosDataHash <-
+        case mData of
+          SNothing -> pure mempty
+          SJust d -> statSingleton d
+      let !vmElems = Map.elems vm
+      tosValue <- statSingleton v
+      tosPolicyId <- statMapKeys vm
+      tosAssetName <- foldMapM statMapKeys vmElems
+      tosAssetValue <- foldMapM statFoldable vmElems
+      tosNetwork <- statSingleton (getNetwork addr)
+      let stats =
+            mempty
+              { tosDataHash,
+                tosValue,
+                tosPolicyId,
+                tosAssetName,
+                tosAssetValue,
+                tosNetwork
               }
-          !networkStat = valueStat {tosNetwork = statSingleton (getNetwork addr)}
-       in case addr of
-            AddrBootstrap addrBootstrap ->
-              networkStat {tosBootstrap = statSingleton addrBootstrap}
-            Addr _ pc sr ->
-              let stakeStat =
-                    case sr of
-                      StakeRefNull -> networkStat
-                      StakeRefPtr ptr ->
-                        networkStat {tosStakingPtr = statSingleton ptr}
-                      StakeRefBase cred ->
-                        networkStat {tosStakingCredential = statSingleton cred}
-               in stakeStat {tosPaymentCredential = statSingleton pc}
+      case addr of
+        AddrBootstrap addrBootstrap -> do
+          tosBootstrap <- statSingleton addrBootstrap
+          pure stats {tosBootstrap}
+        Addr _ pc sr -> do
+          stakeStat <-
+            case sr of
+              StakeRefNull -> pure stats
+              StakeRefPtr ptr -> do
+                tosStakingPtr <- statSingleton ptr
+                pure stats {tosStakingPtr}
+              StakeRefBase cred -> do
+                tosStakingCredential <- statSingleton cred
+                pure stats {tosStakingCredential}
+          tosPaymentCredential <- statSingleton pc
+          pure stakeStat {tosPaymentCredential}
 
 data UTxOStats = UTxOStats
   { usTxInStats :: !TxInStats,
@@ -1047,12 +1115,10 @@ instance Pretty UTxOStats where
 instance AggregateStat UTxOStats where
   aggregateStat = aggregateStat . usTxOutStats
 
-countUTxOStats :: UTxO (AlonzoEra StandardCrypto) -> UTxOStats
+countUTxOStats :: UTxO (AlonzoEra StandardCrypto) -> IO UTxOStats
 countUTxOStats (UTxO m) =
-  UTxOStats
-    { usTxInStats = countTxInStats (Map.keys m),
-      usTxOutStats = countTxOutStats (Map.elems m)
-    }
+  UTxOStats <$> (countTxInStats (Map.keys m) <* logProgress "countTxInStats")
+    <*> (countTxOutStats (Map.elems m) <* logProgress "countTxOutStats")
 
 data AggregateStats = AggregateStats
   { gsCredentialStaking :: !(Stat (Credential 'Staking C)),

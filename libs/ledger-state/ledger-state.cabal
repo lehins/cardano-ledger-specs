@@ -48,6 +48,7 @@ common project-config
                     , strict-containers
                     , small-steps
                     , text
+                    , time
                     , optparse-applicative
                     , heapsize
                     , massiv >= 1.0
