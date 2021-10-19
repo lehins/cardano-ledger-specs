@@ -6,6 +6,7 @@
 module Cardano.Ledger.State.Query where
 
 import Control.Monad
+import Control.Foldl (Fold(..))
 import Control.Iterate.SetAlgebra
 import qualified Cardano.Ledger.Alonzo.TxBody as Alonzo
 import qualified Cardano.Ledger.Shelley.LedgerState as Shelley
@@ -319,9 +320,7 @@ getLedgerStateSomeSharingKeyMap fp =
   runSqlite fp $ do
     ledgerState@LedgerState {..} <- getJust lsid
     dstate <- getDStateWithSharing ledgerStateDstate
-    m <-
-      runConduit
-        (sourceUTxO .| foldlC nestedInsertHM mempty)
+    m <- runConduitFold sourceUTxO txIxSharingKeyMap
     ls <- getLedgerState (Shelley.UTxO mempty) ledgerState dstate
     pure (ls, m)
 
@@ -335,7 +334,7 @@ getLedgerStateSomeSharingKeyMap' fp =
   runSqlite fp $ do
     ledgerState@LedgerState {..} <- getJust lsid
     dstate <- getDStateWithSharing ledgerStateDstate
-    m <- runConduit (sourceUTxO .| foldlC nestedInsertHM' KeyMap.Empty)
+    m <- runConduitFold sourceUTxO txIdSharingKeyMap
     ls <- getLedgerState (Shelley.UTxO mempty) ledgerState dstate
     pure (ls, m)
 
@@ -346,3 +345,7 @@ storeLedgerState fp ls =
   runSqlite (T.pack fp) $ do
     runMigration migrateAll
     insertLedgerState ls
+
+loadDbUTxO :: UTxOFold a -> FilePath -> IO a
+loadDbUTxO (Fold f e g) fp =
+  runSqlite (T.pack fp) (g <$> runConduit (sourceUTxO .| foldlC f e))

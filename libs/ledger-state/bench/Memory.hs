@@ -63,17 +63,27 @@ main = do
     forM_ (optsUtxoJsonFile opts) $ \fp -> do
       wgroup "UTxO" $ do
         wgroup "No TxOut" $ do
-          io "IntMap (KeyMap TxId ())" (loadJsonUTxO txIxSharingKeyMap_) fp
-          io "IntMap (Map TxId ()" (loadJsonUTxO txIxSharing_) fp
+          -- io "IntMap (KeyMap TxId ())" (loadJsonUTxO txIxSharingKeyMap_) fp
+          -- io "KeyMap (IntMap TxId ())" (loadJsonUTxO txIdSharingKeyMap_) fp
+          -- io "IntMap (Map TxId ())" (loadJsonUTxO txIxSharing_) fp
           io "Map TxIn ()" (loadJsonUTxO noSharing_) fp
     forM_ (optsSqliteDbFile opts) $ \dbFpStr -> do
-      let dbFp = T.pack dbFpStr
-      wgroup "LedgerState" $ do
-        io "DState+TxIx sharing+IntMap(KeyMap))" getLedgerStateSomeSharingKeyMap dbFp
-        io "DState+TxIx sharing+KeyMap(IntMap))" getLedgerStateSomeSharingKeyMap' dbFp
-        io "DState sharing" getLedgerStateSomeSharing dbFp
-        io "no-sharing" getLedgerStateNoSharing dbFp
-        -- io "TxOut' (DState+TxOut sharing)" getLedgerStateWithSharing dbFp
+      wgroup "UTxO" $ do
+        wgroup "No TxOut" $ do
+          io "IntMap (KeyMap TxId ())" (loadDbUTxO txIxSharingKeyMap_) dbFpStr
+          io "KeyMap TxId (IntMap TxId ())" (loadDbUTxO txIdSharingKeyMap_) dbFpStr
+          io "IntMap (Map TxId ())" (loadDbUTxO txIxSharing_) dbFpStr
+          io "Map TxIn ()" (loadDbUTxO noSharing_) dbFpStr
+  putStrLn "Done"
+  _ <- getChar
+  pure ()
+      -- let dbFp = T.pack dbFpStr
+      -- wgroup "LedgerState" $ do
+      --   io "DState+TxIx sharing+IntMap(KeyMap))" getLedgerStateSomeSharingKeyMap dbFp
+      --   io "DState+TxIx sharing+KeyMap(IntMap))" getLedgerStateSomeSharingKeyMap' dbFp
+      --   io "DState sharing" getLedgerStateSomeSharing dbFp
+      --   io "no-sharing" getLedgerStateNoSharing dbFp
+      --   -- io "TxOut' (DState+TxOut sharing)" getLedgerStateWithSharing dbFp
 
     -- action "loadLedgerState" $ do
     --   !_ <- loadLedgerState "/home/lehins/iohk/chain/mainnet/ledger-state.bin"

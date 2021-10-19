@@ -325,6 +325,10 @@ loadNewEpochState fp =
 loadLedgerState :: FilePath -> IO (LedgerState CurrentEra)
 loadLedgerState fp = esLState . nesEs <$> loadNewEpochState fp
 
+
+runConduitFold :: Monad m => ConduitT () a m () -> Fold a b -> m b
+runConduitFold source (Fold f e g) = (g <$> runConduit (source .| foldlC f e))
+
 consumeUTxO :: FilePath -> ConduitT (TxIn C, Alonzo.TxOut CurrentEra) Void IO b -> IO b
 consumeUTxO fp sink = do
   withSourceFile fp $ \c -> runConduit $ c .| (sinkParser prefixParser *> parseUTxO) .| sink
@@ -372,7 +376,6 @@ txIxNestedInsert !im (TxIn !txId !txIx, !v) =
           Nothing -> Just $! Map.singleton txId v
           Just !m -> Just $! Map.insert txId v m
    in IntMap.alter f (fromIntegral txIx) im
-
 
 
 txIxSharingKeyMap ::
