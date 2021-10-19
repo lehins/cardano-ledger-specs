@@ -21,6 +21,7 @@ packages:
   libs/non-integral
   libs/small-steps
   libs/small-steps-test
+  libs/compact-map
 
   -- Deprecations
   eras/shelley/chain-and-ledger/executable-spec
@@ -179,4 +180,3 @@ package small-steps-test
 
 package small-steps
   ghc-options: -Werror
-
