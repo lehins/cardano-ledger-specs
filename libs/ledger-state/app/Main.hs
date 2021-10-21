@@ -3,7 +3,6 @@
 module Main where
 
 import Cardano.Ledger.Shelley.LedgerState
-import Cardano.Ledger.State.Massiv
 import Cardano.Ledger.State.UTxO
 import Cardano.Ledger.State.Query
 import Control.Monad
@@ -75,25 +74,9 @@ main = do
   --   _ <- observeMemoryOriginalMap fp
   --   pure ()
 
--- getChar
--- ---collectStats fp
--- -- -- putStrLn $ "Counted: " ++ show (length utxo) ++ " entries"
--- --putStrLn $ "Total ADA: " ++ show (totalADA utxo) ++ " entries"
--- -- collectStats fp
-
 -- observeMemoryOriginalMap fp = do
 --   ref <- newIORef Nothing
 --   utxo <- loadUTxOihm' fp
---   utxo `seq` putStrLn "Loaded"
---   performGC
---   _ <- getChar
---   writeIORef ref $ Just utxo -- ensure utxo doesn't get GCed
---   pure ref
-
--- --observeMemory :: FilePath -> IO (IORef (Maybe UTxOs))
--- observeMemory fp = do
---   ref <- newIORef Nothing
---   utxo <- loadMassivUTxO fp
 --   utxo `seq` putStrLn "Loaded"
 --   performGC
 --   _ <- getChar
@@ -109,5 +92,3 @@ main = do
 --   putStrLn "Converted"
 --   testMassivUTxO utxoOriginalMap utxo
 --   putStrLn "Tested"
-
--- $ cabal build ledger-state && cabal exec -- ledger-state --utxo-json="/path/to/mainnet-utxo-2021-09-15.json" +RTS -s

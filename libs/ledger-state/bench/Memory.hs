@@ -71,15 +71,15 @@ main = do
       io "NewEpochState" loadNewEpochState binFp
     forM_ (optsSqliteDbFile opts) $ \dbFpStr -> do
       let dbFp = T.pack dbFpStr
-      wgroup "Baseline" $ do
-        io "DState" loadDStateNoSharing dbFp
-        io "UTxO" loadUTxONoSharing dbFp
-        io "LedgerState" getLedgerStateNoSharing dbFp
-      -- wgroup "UTxO (No TxOut)" $ do
-      --   io "IntMap (KeyMap TxId ())" (loadDbUTxO txIxSharingKeyMap_) dbFpStr
-      --   io "KeyMap TxId (IntMap TxId ())" (loadDbUTxO txIdSharingKeyMap_) dbFpStr
-      --   io "IntMap (Map TxId ())" (loadDbUTxO txIxSharing_) dbFpStr
-      --   io "Map TxIn ()" (loadDbUTxO noSharing_) dbFpStr
+      -- wgroup "Baseline" $ do
+      --   io "DState" loadDStateNoSharing dbFp
+      --   io "UTxO" loadUTxONoSharing dbFp
+      --   io "LedgerState" getLedgerStateNoSharing dbFp
+      wgroup "UTxO (No TxOut)" $ do
+        io "IntMap (KeyMap TxId ())" (loadDbUTxO txIxSharingKeyMap_) dbFpStr
+        io "KeyMap TxId (IntMap TxId ())" (loadDbUTxO txIdSharingKeyMap_) dbFpStr
+        io "IntMap (Map TxId ())" (loadDbUTxO txIxSharing_) dbFpStr
+        io "Map TxIn ()" (loadDbUTxO noSharing_) dbFpStr
       -- wgroup "LedgerState" $ do
       --   wgroup "Share DState" $ do
       --       io "IntMap (KeyMap TxId TxOut)" getLedgerStateDStateTxIxSharingKeyMap dbFp

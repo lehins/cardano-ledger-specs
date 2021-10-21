@@ -11,13 +11,6 @@
 
 module Cardano.Ledger.State.UTxO where
 
-import Control.Foldl (Fold (..))
-import Data.Word
-import Cardano.Prelude (HeapWords(..))
-import qualified Cardano.Crypto.Hash.Class as HS
-import qualified Data.Hashable as HM
-import qualified Data.HashMap.Strict as HM
-import Cardano.Ledger.TxIn
 import qualified Cardano.Address as A
 import qualified Cardano.Address.Style.Byron as AB
 import qualified Cardano.Address.Style.Icarus as AI
@@ -28,7 +21,7 @@ import qualified Cardano.Crypto.Hash.Class as H
 import qualified Cardano.Crypto.Hashing as Byron
 import Cardano.Ledger.Address
 import Cardano.Ledger.Alonzo
-import Cardano.Ledger.Alonzo.Data
+import Cardano.Ledger.Alonzo.Data hiding (scripts)
 import Cardano.Ledger.Alonzo.TxBody as Alonzo
 import Cardano.Ledger.BaseTypes
 import Cardano.Ledger.Credential
@@ -39,13 +32,13 @@ import Cardano.Ledger.Mary.Value
 import qualified Cardano.Ledger.Mary.Value as Mary
 import qualified Cardano.Ledger.SafeHash as SafeHash
 import Cardano.Ledger.Shelley.API
-import Cardano.Ledger.Shelley.EpochBoundary
 import Cardano.Ledger.Shelley.LedgerState
 import Cardano.Ledger.Shelley.Rewards
 import Cardano.Protocol.TPraos (individualPoolStakeVrf)
 import Codec.CBOR.Read (deserialiseFromBytes)
 import Conduit
 import Control.Exception (throwIO)
+import Control.Foldl (Fold (..))
 import Control.Iterate.SetAlgebra (range)
 import Control.Monad
 import Data.Aeson as Aeson
@@ -56,6 +49,7 @@ import qualified Data.Attoparsec.ByteString.Char8 as Atto8
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as B16
 import qualified Data.ByteString.Lazy as LBS
+import Data.Compact.KeyMap as KeyMap hiding (Stat)
 import Data.Conduit.Attoparsec
 import qualified Data.Conduit.List as C
 import Data.Foldable as F
@@ -71,7 +65,6 @@ import Data.Typeable
 import Numeric.Natural
 import Prettyprinter
 import Text.Printf
-import Data.Compact.KeyMap as KeyMap hiding (Stat)
 
 type C = StandardCrypto
 
@@ -231,9 +224,9 @@ instance ToJSON (Mary.Value C) where
 
 instance FromJSON (Mary.Value C) where
   parseJSON = withObject "Value" $ \obj -> do
-    lovelace <- obj .: "lovelace" -- There are Icarus addresses without any lovelace!?
-    policies <- obj .:? "policies" .!= mempty
-    pure $ Mary.Value lovelace policies
+    lovelaceVal <- obj .: "lovelace" -- There are Icarus addresses without any lovelace!?
+    policiesVal <- obj .:? "policies" .!= mempty
+    pure $ Mary.Value lovelaceVal policiesVal
 
 instance ToJSON (Mary.PolicyID C) where
   toJSON (Mary.PolicyID (ScriptHash h)) = String (H.hashToTextAsHex h)
@@ -325,7 +318,6 @@ loadNewEpochState fp =
 loadLedgerState :: FilePath -> IO (LedgerState CurrentEra)
 loadLedgerState fp = esLState . nesEs <$> loadNewEpochState fp
 
-
 runConduitFold :: Monad m => ConduitT () a m () -> Fold a b -> m b
 runConduitFold source (Fold f e g) = (g <$> runConduit (source .| foldlC f e))
 
@@ -345,16 +337,16 @@ noSharing_ :: UTxOFold (Map.Map (TxIn C) ())
 noSharing_ = Fold (\ !m !(!k, _) -> Map.insert k () m) mempty id
 
 txIdSharing ::
-     UTxOFold (Map.Map (TxId C) (IntMap.IntMap (Alonzo.TxOut CurrentEra)))
+  UTxOFold (Map.Map (TxId C) (IntMap.IntMap (Alonzo.TxOut CurrentEra)))
 txIdSharing = Fold txIdNestedInsert mempty id
 
 txIdSharing_ :: UTxOFold (Map.Map (TxId C) (IntMap.IntMap ()))
 txIdSharing_ = Fold (\a v -> txIdNestedInsert a (() <$ v)) mempty id
 
 txIdNestedInsert ::
-     Map.Map (TxId C) (IntMap.IntMap a)
-  -> (TxIn C, a)
-  -> Map.Map (TxId C) (IntMap.IntMap a)
+  Map.Map (TxId C) (IntMap.IntMap a) ->
+  (TxIn C, a) ->
+  Map.Map (TxId C) (IntMap.IntMap a)
 txIdNestedInsert !m (TxIn !txId !txIx, !v) =
   let !e = IntMap.singleton (fromIntegral txIx) v
    in Map.insertWith (<>) txId e m
@@ -366,16 +358,15 @@ txIxSharing_ :: UTxOFold (IntMap.IntMap (Map.Map (TxId C) ()))
 txIxSharing_ = Fold (\a v -> txIxNestedInsert a (() <$ v)) mempty id
 
 txIxNestedInsert ::
-     IntMap.IntMap (Map.Map (TxId C) a)
-  -> (TxIn C, a)
-  -> IntMap.IntMap (Map.Map (TxId C) a)
+  IntMap.IntMap (Map.Map (TxId C) a) ->
+  (TxIn C, a) ->
+  IntMap.IntMap (Map.Map (TxId C) a)
 txIxNestedInsert !im (TxIn !txId !txIx, !v) =
   let f =
         \case
           Nothing -> Just $! Map.singleton txId v
           Just !m -> Just $! Map.insert txId v m
    in IntMap.alter f (fromIntegral txIx) im
-
 
 txIxSharingKeyMap :: Fold (TxIn C, a) (IntMap.IntMap (KeyMap.KeyMap a))
 txIxSharingKeyMap = Fold txIxNestedInsertKeyMap mempty id
@@ -385,9 +376,9 @@ txIxSharingKeyMap_ =
   Fold ((\m (k, _) -> txIxNestedInsertKeyMap m (k, ()))) mempty id
 
 txIxNestedInsertKeyMap ::
-     IntMap.IntMap (KeyMap.KeyMap a)
-  -> (TxIn C, a)
-  -> IntMap.IntMap (KeyMap.KeyMap a)
+  IntMap.IntMap (KeyMap.KeyMap a) ->
+  (TxIn C, a) ->
+  IntMap.IntMap (KeyMap.KeyMap a)
 txIxNestedInsertKeyMap !m (TxInCompact32 x1 x2 x3 x4 txIx, !v) =
   let !key = KeyMap.Key x1 x2 x3 x4
       f =
@@ -395,7 +386,7 @@ txIxNestedInsertKeyMap !m (TxInCompact32 x1 x2 x3 x4 txIx, !v) =
           Nothing -> Just $! KeyMap.Leaf key v
           Just hm -> Just $! KeyMap.insert key v hm
    in IntMap.alter f (fromIntegral txIx) m
-
+txIxNestedInsertKeyMap _ _ = error "Impossible"
 
 txIdSharingKeyMap :: Fold (TxIn C, a) (KeyMap.KeyMap (IntMap.IntMap a))
 txIdSharingKeyMap = Fold txIdNestedInsertKeyMap KeyMap.Empty id
@@ -404,34 +395,29 @@ txIdSharingKeyMap_ :: UTxOFold (KeyMap.KeyMap (IntMap.IntMap ()))
 txIdSharingKeyMap_ = Fold (\a (k, _) -> txIdNestedInsertKeyMap a (k, ())) KeyMap.Empty id
 
 txIdNestedInsertKeyMap ::
-     KeyMap.KeyMap (IntMap.IntMap a)
-  -> (TxIn C, a)
-  -> KeyMap.KeyMap (IntMap.IntMap a)
+  KeyMap.KeyMap (IntMap.IntMap a) ->
+  (TxIn C, a) ->
+  KeyMap.KeyMap (IntMap.IntMap a)
 txIdNestedInsertKeyMap !m (TxInCompact32 x1 x2 x3 x4 txIx, !a) =
   let !key = KeyMap.Key x1 x2 x3 x4
-   in case KeyMap.lookupHM key m of
-        Nothing ->
-          let !v = IntMap.singleton (fromIntegral txIx) a
-           in KeyMap.insert key v m
-        Just im ->
-          let !v = IntMap.insert (fromIntegral txIx) a im
-           in KeyMap.insert key v m
-
+      !v = IntMap.singleton (fromIntegral txIx) a
+   in KeyMap.insertWith (<>) key v m
+txIdNestedInsertKeyMap _ _ = error "Impossible"
 
 testKeyMap ::
-     KeyMap.KeyMap (IntMap.IntMap (Alonzo.TxOut CurrentEra))
-  -> Map.Map (TxIn C) (Alonzo.TxOut CurrentEra)
-  -> IO ()
+  KeyMap.KeyMap (IntMap.IntMap (Alonzo.TxOut CurrentEra)) ->
+  Map.Map (TxIn C) (Alonzo.TxOut CurrentEra) ->
+  IO ()
 testKeyMap km m =
   case Map.foldlWithKey' test km m of
     KeyMap.Empty -> putStrLn "Tested UTxO equality: Pass"
     _ -> error "Expected the KeyMap to be empty, but it's not."
   where
     test ::
-         KeyMap.KeyMap (IntMap.IntMap (Alonzo.TxOut CurrentEra))
-      -> TxIn C
-      -> Alonzo.TxOut CurrentEra
-      -> KeyMap.KeyMap (IntMap.IntMap (Alonzo.TxOut CurrentEra))
+      KeyMap.KeyMap (IntMap.IntMap (Alonzo.TxOut CurrentEra)) ->
+      TxIn C ->
+      Alonzo.TxOut CurrentEra ->
+      KeyMap.KeyMap (IntMap.IntMap (Alonzo.TxOut CurrentEra))
     test acc txIn@(TxInCompact32 x1 x2 x3 x4 txIx) txOut =
       let !key = KeyMap.Key x1 x2 x3 x4
        in case KeyMap.lookupHM key acc of
@@ -446,48 +432,7 @@ testKeyMap km m =
                         error $ "Found mismatching TxOuts for " <> show txIn
                       | IntMap.null im' -> KeyMap.delete key acc
                       | otherwise -> KeyMap.insert key im' acc
-
-
--- instance HM.Hashable (TxIn C) where
---   hashWithSalt _salt (TxInCompact32 x1 _ _ _ _) = fromIntegral x1
---   hash (TxInCompact32 x1 _ _ _ _) = fromIntegral x1
-
--- instance HM.Hashable (TxId C) where
---   hashWithSalt _salt = hashTxId
---   hash = hashTxId
-
--- hashTxId :: TxId C -> Int
--- hashTxId (TxId sh) =
---   case HS.viewHash32 (SafeHash.extractHash sh) of
---     HS.ViewHashNot32 -> error "irrelevant"
---     HS.ViewHash32 a _ _ _ -> fromIntegral a
-
--- nestedInsertHM ::
---      IntMap.IntMap (KeyMap.KeyMap a)
---   -> (TxIn C, a)
---   -> IntMap.IntMap (KeyMap.KeyMap a)
--- nestedInsertHM !m (TxInCompact32 x1 x2 x3 x4 txIx, !v) =
---   let !key = KeyMap.Key x1 x2 x3 x4
---       f =
---         \case
---           Nothing -> Just $! KeyMap.Leaf key v
---           Just hm -> Just $! KeyMap.insert key v hm
---    in IntMap.alter f (fromIntegral txIx) m
-
-
--- nestedInsertHM' ::
---      KeyMap.KeyMap (IntMap.IntMap a)
---   -> (TxIn C, a)
---   -> KeyMap.KeyMap (IntMap.IntMap a)
--- nestedInsertHM' !hm (TxInCompact32 x1 x2 x3 x4 txIx, !a) =
---   let !key = KeyMap.Key x1 x2 x3 x4
---    in case KeyMap.lookupHM key hm of
---         Nothing ->
---           let !v = IntMap.singleton (fromIntegral txIx) a
---            in KeyMap.insert key v hm
---         Just im ->
---           let !v = IntMap.insert (fromIntegral txIx) a im
---            in KeyMap.insert key v $ KeyMap.delete key hm
+    test _ _ _ = error "Impossible"
 
 totalADA :: Map.Map (TxIn C) (Alonzo.TxOut CurrentEra) -> Mary.Value C
 totalADA = foldMap (\(Alonzo.TxOut _ v _) -> v)
@@ -499,7 +444,8 @@ loadBinUTxO :: FilePath -> IO (UTxO CurrentEra)
 loadBinUTxO fp = do
   ls <- loadNewEpochState fp
   pure $! _utxo $ _utxoState $ esLState $ nesEs ls
-  -- runConduit $ C.sourceList (Map.toList u) .| collectStats
+
+-- runConduit $ C.sourceList (Map.toList u) .| collectStats
 
 collectStats :: ConduitT (TxIn C, Alonzo.TxOut CurrentEra) Void IO ()
 collectStats = do
@@ -825,15 +771,15 @@ instance Pretty EpochStateStats where
 
 countEpochStateStats :: EpochState CurrentEra -> EpochStateStats
 countEpochStateStats EpochState {..} =
-  let mark = countSnapShotStat (_pstakeMark esSnapshots)
-      set = countSnapShotStat (_pstakeSet esSnapshots)
-      go = countSnapShotStat (_pstakeGo esSnapshots)
+  let markSnap = countSnapShotStat (_pstakeMark esSnapshots)
+      setSnap = countSnapShotStat (_pstakeSet esSnapshots)
+      goSnap = countSnapShotStat (_pstakeGo esSnapshots)
       stats =
         EpochStateStats
-          { essMarkSnapShotStats = mark,
-            essSetSnapShotStats = set,
-            essGoSnapShotStats = go,
-            essSnapShotsStats = mark <> set <> go,
+          { essMarkSnapShotStats = markSnap,
+            essSetSnapShotStats = setSnap,
+            essGoSnapShotStats = goSnap,
+            essSnapShotsStats = markSnap <> setSnap <> goSnap,
             essLedgerStateStats = countLedgerStateStats esLState,
             essNonMyopic = statMapKeys (likelihoodsNM esNonMyopic),
             essAggregateStats = mempty
@@ -1147,5 +1093,3 @@ data UTxOStats' = UTxOStats'
 
 initStats :: UTxOStats'
 initStats = UTxOStats' 0 0 0 0 0 0 0 0
-
--- newtype UTxO era = UTxO (Map (TxId (Crypto era)) (IntMap (TxOut era)))

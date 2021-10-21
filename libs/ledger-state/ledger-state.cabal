@@ -52,12 +52,6 @@ common project-config
                     , small-steps
                     , text
                     , transformers
-                    , optparse-applicative
-                    , heapsize
-                    , massiv >= 1.0
-                    , unordered-containers
-                    , hashable
-                    , monad-logger
 
   ghc-options:        -Wall
                       -Wcompat
@@ -71,7 +65,6 @@ library
   exposed-modules:    Cardano.Ledger.State
                     , Cardano.Ledger.State.UTxO
                     , Cardano.Ledger.State.Orphans
-                    , Cardano.Ledger.State.Massiv
                     , Cardano.Ledger.State.Schema
                     , Cardano.Ledger.State.Transform
                     , Cardano.Ledger.State.Query
