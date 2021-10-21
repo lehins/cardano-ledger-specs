@@ -8,24 +8,39 @@
 
 module Cardano.Ledger.State.Orphans where
 
-import Data.Typeable
 import Cardano.Binary
 import Cardano.Crypto.Hash.Class
 import Cardano.Ledger.Alonzo.TxBody
 import Cardano.Ledger.Coin
-import Cardano.Ledger.Mary.Value
+import Cardano.Ledger.Alonzo.PParams
+import Cardano.Ledger.Credential
+import Cardano.Ledger.Keys
 import Cardano.Ledger.SafeHash
-import Cardano.Ledger.Shelley.CompactAddr
 import Cardano.Ledger.Shelley.LedgerState
+import Cardano.Ledger.Shelley.Rewards
+import Cardano.Ledger.Shelley.TxBody (PoolParams (..))
 import Cardano.Ledger.State.UTxO
 import Cardano.Ledger.TxIn
 import Control.DeepSeq
 import Data.ByteString.Short
 import qualified Data.Text as T
+import Data.Typeable
 import Database.Persist
 import Database.Persist.Sqlite
-import Cardano.Ledger.Keys
-import Cardano.Ledger.Credential
+
+data SnapShotType
+  = SnapShotMark
+  | SnapShotSet
+  | SnapShotGo
+  deriving (Show, Eq, Enum, Bounded)
+
+instance PersistField SnapShotType where
+  toPersistValue = PersistInt64 . fromIntegral . fromEnum
+  fromPersistValue (PersistInt64 i64) = Right $ toEnum $ fromIntegral i64
+  fromPersistValue _ = Left "Unexpected type"
+
+instance PersistFieldSql SnapShotType where
+  sqlType _ = SqlInt32
 
 instance PersistField ShortByteString where
   toPersistValue = PersistByteString . fromShort
@@ -83,45 +98,46 @@ decodePersistValue (PersistByteString bs) =
     Right v -> Right v
 decodePersistValue _ = Left "Unexpected type"
 
+deriving via Enc (KeyHash r C) instance Typeable r => PersistField (KeyHash r C)
 
+deriving via Enc (KeyHash r C) instance Typeable r => PersistFieldSql (KeyHash r C)
 
-deriving via Enc (KeyHash r C) instance
-         Typeable r => PersistField (KeyHash r C)
-deriving via Enc (KeyHash r C) instance
-         Typeable r => PersistFieldSql (KeyHash r C)
+deriving via Enc (Credential r C) instance Typeable r => PersistField (Credential r C)
 
-deriving via Enc (Credential r C) instance
-         Typeable r => PersistField (Credential r C)
-deriving via Enc (Credential r C) instance
-         Typeable r => PersistFieldSql (Credential r C)
+deriving via Enc (Credential r C) instance Typeable r => PersistFieldSql (Credential r C)
 
-deriving via Enc Ptr instance
-         PersistField Ptr
-deriving via Enc Ptr instance
-         PersistFieldSql Ptr
+deriving via Enc Ptr instance PersistField Ptr
 
-deriving via Enc (PPUPState CurrentEra) instance
-         PersistField (PPUPState CurrentEra)
-deriving via Enc (PPUPState CurrentEra) instance
-         PersistFieldSql (PPUPState CurrentEra)
+deriving via Enc Ptr instance PersistFieldSql Ptr
 
-deriving via Enc (TxOut CurrentEra) instance
-         PersistField (TxOut CurrentEra)
-deriving via Enc (TxOut CurrentEra) instance
-         PersistFieldSql (TxOut CurrentEra)
+deriving via Enc (PPUPState CurrentEra) instance PersistField (PPUPState CurrentEra)
 
-deriving via Enc (DState C) instance
-         PersistField (DState C)
-deriving via Enc (DState C) instance
-         PersistFieldSql (DState C)
+deriving via Enc (PPUPState CurrentEra) instance PersistFieldSql (PPUPState CurrentEra)
 
-deriving via Enc (PState C) instance
-         PersistField (PState C)
-deriving via Enc (PState C) instance
-         PersistFieldSql (PState C)
+deriving via Enc (TxOut CurrentEra) instance PersistField (TxOut CurrentEra)
 
-deriving via Enc (GenDelegs C) instance
-         PersistField (GenDelegs C)
-deriving via Enc (GenDelegs C) instance
-         PersistFieldSql (GenDelegs C)
+deriving via Enc (TxOut CurrentEra) instance PersistFieldSql (TxOut CurrentEra)
 
+deriving via Enc (DState C) instance PersistField (DState C)
+
+deriving via Enc (DState C) instance PersistFieldSql (DState C)
+
+deriving via Enc (PState C) instance PersistField (PState C)
+
+deriving via Enc (PState C) instance PersistFieldSql (PState C)
+
+deriving via Enc (GenDelegs C) instance PersistField (GenDelegs C)
+
+deriving via Enc (GenDelegs C) instance PersistFieldSql (GenDelegs C)
+
+deriving via Enc (PoolParams C) instance PersistField (PoolParams C)
+
+deriving via Enc (PoolParams C) instance PersistFieldSql (PoolParams C)
+
+deriving via Enc (NonMyopic C) instance PersistField (NonMyopic C)
+
+deriving via Enc (NonMyopic C) instance PersistFieldSql (NonMyopic C)
+
+deriving via Enc (PParams CurrentEra) instance PersistField (PParams CurrentEra)
+
+deriving via Enc (PParams CurrentEra) instance PersistFieldSql (PParams CurrentEra)

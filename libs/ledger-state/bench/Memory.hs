@@ -58,6 +58,7 @@ main = do
          (long "help" <> short 'h' <> help "Display this message."))
       (header "ledger-state:memory - Tool for analyzing memory consumption of ledger state")
   let cols = [Case, Max, MaxOS, Live, Allocated, GCs]
+  !mEpochStateEntity <- mapM loadEpochStateEntity (optsSqliteDbFile opts)
   mainWith $ do
     setColumns cols
     forM_ (optsUtxoJsonFile opts) $ \fp -> do
@@ -71,15 +72,20 @@ main = do
       io "NewEpochState" loadNewEpochState binFp
     forM_ (optsSqliteDbFile opts) $ \dbFpStr -> do
       let dbFp = T.pack dbFpStr
+      forM_ mEpochStateEntity $ \ese ->
+        wgroup "EpochState" $ do
+          io "SnapShots - no sharing" (loadSnapShotsNoSharing dbFpStr) ese
+          io "SnapShots - with sharing" (loadSnapShotsWithSharing dbFpStr) ese
+          -- io "SnapShots - with sharing + poolParams sharing" (loadSnapShotsWithMaxSharing dbFpStr) ese
       -- wgroup "Baseline" $ do
       --   io "DState" loadDStateNoSharing dbFp
       --   io "UTxO" loadUTxONoSharing dbFp
       --   io "LedgerState" getLedgerStateNoSharing dbFp
-      wgroup "UTxO (No TxOut)" $ do
-        io "IntMap (KeyMap TxId ())" (loadDbUTxO txIxSharingKeyMap_) dbFpStr
-        io "KeyMap TxId (IntMap TxId ())" (loadDbUTxO txIdSharingKeyMap_) dbFpStr
-        io "IntMap (Map TxId ())" (loadDbUTxO txIxSharing_) dbFpStr
-        io "Map TxIn ()" (loadDbUTxO noSharing_) dbFpStr
+      -- wgroup "UTxO (No TxOut)" $ do
+      --   io "IntMap (KeyMap TxId ())" (loadDbUTxO txIxSharingKeyMap_) dbFpStr
+      --   io "KeyMap TxId (IntMap TxId ())" (loadDbUTxO txIdSharingKeyMap_) dbFpStr
+      --   io "IntMap (Map TxId ())" (loadDbUTxO txIxSharing_) dbFpStr
+      --   io "Map TxIn ()" (loadDbUTxO noSharing_) dbFpStr
       -- wgroup "LedgerState" $ do
       --   wgroup "Share DState" $ do
       --       io "IntMap (KeyMap TxId TxOut)" getLedgerStateDStateTxIxSharingKeyMap dbFp

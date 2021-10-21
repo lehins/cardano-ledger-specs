@@ -12,30 +12,74 @@
 
 module Cardano.Ledger.State.Schema where
 
+import qualified Cardano.Ledger.Alonzo.PParams as Alonzo
 import qualified Cardano.Ledger.Alonzo.TxBody as Alonzo
 import Cardano.Ledger.Coin
+import qualified Cardano.Ledger.Credential as Credential
+import qualified Cardano.Ledger.Keys as Keys
 import qualified Cardano.Ledger.Shelley.LedgerState as Shelley
-import Cardano.Ledger.State.Orphans (Enc)
+import qualified Cardano.Ledger.Shelley.Rewards as Shelley
+import qualified Cardano.Ledger.Shelley.TxBody as Shelley
+import Cardano.Ledger.State.Orphans (Enc, SnapShotType (..))
 import Cardano.Ledger.State.UTxO
 import qualified Cardano.Ledger.TxIn as TxIn
+import qualified Data.Map.Strict as Map
 import Data.Word
 import Database.Persist.Sqlite
 import Database.Persist.TH
-import qualified Data.Map.Strict as Map
-import qualified Cardano.Ledger.Keys as Keys
-import qualified Cardano.Ledger.Credential as Credential
 
 type FGenDelegs = (Enc (Map.Map (Shelley.FutureGenDeleg C) (Keys.GenDelegPair C)))
 
 type CredentialWitness = Credential.Credential 'Keys.Witness C
+
 type KeyHashWitness = Keys.KeyHash 'Keys.Witness C
-
--- try:?  inId ((Word64, Word64), (Word64, Word64))
-
 
 share
   [mkPersist sqlSettings, mkMigrate "migrateAll"]
   [persistLowerCase|
+EpochState
+  treasury Coin
+  reserves Coin
+  prevPp (Alonzo.PParams CurrentEra)
+  pp (Alonzo.PParams CurrentEra)
+  nonMyopic (Shelley.NonMyopic C)
+  snapShotsFee Coin
+
+SnapShot
+  type SnapShotType
+  epochStateId EpochStateId
+  -- UniqueSnapShot type epochStateId
+SnapShotStake
+  snapShotId SnapShotId
+  credentialId CredentialId
+  coin Coin
+  UniqueSnapShotStake snapShotId credentialId
+SnapShotDelegation
+  snapShotId SnapShotId
+  credentialId CredentialId
+  keyHash KeyHashId
+  UniqueSnapShotDelegation snapShotId credentialId
+SnapShotPool
+  snapShotId SnapShotId
+  keyHashId KeyHashId
+  params (Shelley.PoolParams C)
+  UniqueSnapShotPool snapShotId keyHashId
+
+LedgerState
+  utxoId UtxoStateId
+  dstateId DStateId
+  epochStateId EpochStateId
+  pstateBin (Shelley.PState C)
+UtxoState
+  deposited Coin
+  fees Coin
+  ppups (Shelley.PPUPState CurrentEra)
+DState
+  fGenDelegs FGenDelegs
+  genDelegs (Keys.GenDelegs C)
+  irDeltaReserves DeltaCoin
+  irDeltaTreasury DeltaCoin
+
 Credential
   witness CredentialWitness
   UniqueCredential witness
@@ -54,46 +98,33 @@ Txs
   stakeCredential CredentialId Maybe
   UniqueTxs inIx inId
 UtxoEntry
-  tx TxId
-  txs TxsId
-  state UtxoStateId
-UtxoState
-  deposited Coin
-  fees Coin
-  ppups (Shelley.PPUPState CurrentEra)
-LedgerState
-  utxo UtxoStateId
-  dstate DStateId
-  pstateBin (Shelley.PState C)
-DState
-  fGenDelegs FGenDelegs
-  genDelegs (Keys.GenDelegs C)
-  irDeltaReserves DeltaCoin
-  irDeltaTreasury DeltaCoin
+  txId TxId
+  txsId TxsId
+  stateId UtxoStateId
 Reward
-  dstate DStateId
-  credential CredentialId
+  dstateId DStateId
+  credentialId CredentialId
   coin Coin
-  UniqueReward dstate credential coin
+  UniqueReward dstateId credentialId coin
 Delegation
-  dstate DStateId
-  credential CredentialId
-  stakePool KeyHashId
-  UniqueDelegation dstate credential
+  dstateId DStateId
+  credentialId CredentialId
+  stakePoolId KeyHashId
+  UniqueDelegation dstateId credentialId
 Ptr
-  dstate DStateId
-  credential CredentialId
+  dstateId DStateId
+  credentialId CredentialId
   ptr Credential.Ptr
-  UniquePtrPtr dstate ptr
-  UniquePtrCredential dstate credential
+  UniquePtrPtr dstateId ptr
+  UniquePtrCredential dstateId credentialId
 IRReserves
-  dstate DStateId
-  credential CredentialId
+  dstateId DStateId
+  credentialId CredentialId
   coin Coin
-  UniqueIRReserves dstate credential
+  UniqueIRReserves dstateId credentialId
 IRTreasury
-  dstate DStateId
-  credential CredentialId
+  dstateId DStateId
+  credentialId CredentialId
   coin Coin
-  UniqueIRTreasury dstate credential
+  UniqueIRTreasury dstateId credentialId
 |]

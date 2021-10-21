@@ -3,14 +3,12 @@
 module Cardano.Ledger.State.Transform where
 
 import Control.DeepSeq
-import qualified Data.Map.Strict as Map
 import Data.Map.Strict.Internal
 import Cardano.Ledger.State.UTxO
 import Cardano.Ledger.Address
 import Cardano.Ledger.Shelley.CompactAddr
 import Cardano.Ledger.Alonzo.TxBody as Alonzo
 import Cardano.Ledger.Credential
-import Debug.Trace
 
 -- data Addr'
 --   = AddrKeyIx' !Network !Ix1 !StakeIx
@@ -55,18 +53,66 @@ toTxOut' m txOut =
           Just (compactAddr (Addr ni pc StakeRefNull), intern sr m)
         _ -> Nothing
 
-intern' :: (Show k, Ord k) => k -> Map k a -> k
-intern' k m =
-  case Map.lookupIndex k m of
-    Nothing -> k
-    Just ix -> fst $ Map.elemAt ix m
+-- intern' :: (Show k, Ord k) => k -> Map k a -> k
+-- intern' k m =
+--   case Map.lookupIndex k m of
+--     Nothing -> k
+--     Just ix -> fst $ Map.elemAt ix m
 
-intern :: (Show k, Ord k) => k -> Map k a -> k
-intern k = go
+intern :: Ord k => k -> Map k a -> k
+intern !k m =
+  case internMaybe k m of
+    Just kx -> kx
+    Nothing -> k
+
+
+interns :: Ord k => k -> [Map k a] -> k
+interns !k = go
   where
-    go Tip = k
+    go [] = k
+    go (m:ms) =
+      case internMaybe k m of
+        Just kx -> kx
+        Nothing -> go ms
+
+
+internMaybe :: Ord k => k -> Map k a -> Maybe k
+internMaybe !k = go
+  where
+    go Tip = Nothing
     go (Bin _ kx _ l r) =
       case compare k kx of
         LT -> go l
         GT -> go r
-        EQ -> kx
+        EQ -> Just kx
+
+
+
+internVal :: (Eq a, Ord k) => k -> a -> Map k a -> a
+internVal !k !a m =
+  case internValMaybe k a m of
+    Just ax -> ax
+    Nothing -> a
+
+
+internsVal :: (Eq a, Ord k) => k -> a -> [Map k a] -> a
+internsVal !k !a = go
+  where
+    go [] = a
+    go (m:ms) =
+      case internValMaybe k a m of
+        Just ax -> ax
+        Nothing -> go ms
+
+
+internValMaybe :: (Eq a, Ord k) => k -> a -> Map k a -> Maybe a
+internValMaybe !k !a = go
+  where
+    go Tip = Nothing
+    go (Bin _ kx ax l r) =
+      case compare k kx of
+        LT -> go l
+        GT -> go r
+        EQ
+          | a == ax -> Just ax
+          | otherwise -> Nothing

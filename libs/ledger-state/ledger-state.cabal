@@ -81,6 +81,7 @@ executable ledger-state
                        -rtsopts
   build-depends:       ledger-state
                      , deepseq
+                     , optparse-applicative
 
 
 benchmark memory

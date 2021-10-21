@@ -60,16 +60,16 @@ main = do
          (ShowHelpText Nothing)
          (long "help" <> short 'h' <> help "Display this message."))
       (header "ledger-state - Tool for analyzing ledger state")
+  forM_ (optsLedgerStateBinaryFile opts) $ \binFp -> do
+    nes <- loadNewEpochState binFp
+    forM_ (optsSqliteDbFile opts) $ \dbFp -> do
+      storeEpochState dbFp $ nesEs nes
+      putStrLn "Loaded EpochState into the database"
+    printNewEpochStateStats $ countNewEpochStateStats nes
   forM_ (optsSqliteDbFile opts) $ \dbFp -> do
     km <- loadDbUTxO txIdSharingKeyMap dbFp
     m <- loadDbUTxO noSharing dbFp
     testKeyMap km m
-  forM_ (optsLedgerStateBinaryFile opts) $ \binFp -> do
-    ls <- loadNewEpochState binFp
-    forM_ (optsSqliteDbFile opts) $ \dbFp -> do
-      storeLedgerState dbFp $ esLState $ nesEs ls
-      putStrLn "Loaded LedgerState into the database"
-    printNewEpochStateStats $ countNewEpochStateStats ls
   -- forM_ (optsUtxoJsonFile opts) $ \fp -> do
   --   _ <- observeMemoryOriginalMap fp
   --   pure ()
