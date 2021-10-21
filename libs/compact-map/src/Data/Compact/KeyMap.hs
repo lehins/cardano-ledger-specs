@@ -165,7 +165,7 @@ data KeyMap v
     | One {-# UNPACK #-} !Int !(KeyMap v)                          -- 1 subtree
     | Two {-# UNPACK #-} !Bitmap !(KeyMap v) !(KeyMap v)           -- 2 subtrees
     | BitmapIndexed {-# UNPACK #-} !Bitmap                         -- 3 - (intSize - 1) subtrees
-                    {-# UNPACK #-} !(Small.SmallArray (KeyMap v))  
+                    {-# UNPACK #-} !(Small.SmallArray (KeyMap v))
     | Full {-# UNPACK #-} !(Small.SmallArray (KeyMap v))           -- intSize subtrees
   deriving (NFData,Generic)
 

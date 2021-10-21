@@ -30,6 +30,9 @@ type FGenDelegs = (Enc (Map.Map (Shelley.FutureGenDeleg C) (Keys.GenDelegPair C)
 type CredentialWitness = Credential.Credential 'Keys.Witness C
 type KeyHashWitness = Keys.KeyHash 'Keys.Witness C
 
+-- try:?  inId ((Word64, Word64), (Word64, Word64))
+
+
 share
   [mkPersist sqlSettings, mkMigrate "migrateAll"]
   [persistLowerCase|
@@ -44,8 +47,15 @@ Tx
   inId (TxIn.TxId C)
   out (Alonzo.TxOut CurrentEra)
   UniqueTx inIx inId
+Txs
+  inIx Word64
+  inId (TxIn.TxId C)
+  out (Alonzo.TxOut CurrentEra)
+  stakeCredential CredentialId Maybe
+  UniqueTxs inIx inId
 UtxoEntry
   tx TxId
+  txs TxsId
   state UtxoStateId
 UtxoState
   deposited Coin

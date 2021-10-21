@@ -41,6 +41,7 @@ common project-config
                     , conduit
                     , conduit-extra
                     , containers
+                    , compact-map
                     , deepseq
                     , foldl
                     , persistent

@@ -338,7 +338,7 @@ loadJsonUTxO (Fold f e g) fp = consumeUTxO fp (g <$> foldlC f e)
 
 type UTxOFold b = Fold (TxIn C, Alonzo.TxOut CurrentEra) b
 
-noSharing :: UTxOFold (Map.Map (TxIn C) (Alonzo.TxOut CurrentEra))
+noSharing :: Fold (TxIn C, a) (Map.Map (TxIn C) a)
 noSharing = Fold (\ !m !(!k, !v) -> Map.insert k v m) mempty id
 
 noSharing_ :: UTxOFold (Map.Map (TxIn C) ())
@@ -359,8 +359,7 @@ txIdNestedInsert !m (TxIn !txId !txIx, !v) =
   let !e = IntMap.singleton (fromIntegral txIx) v
    in Map.insertWith (<>) txId e m
 
-txIxSharing ::
-     UTxOFold (IntMap.IntMap (Map.Map (TxId C) (Alonzo.TxOut CurrentEra)))
+txIxSharing :: Fold (TxIn C, a) (IntMap.IntMap (Map.Map (TxId C) a))
 txIxSharing = Fold txIxNestedInsert mempty id
 
 txIxSharing_ :: UTxOFold (IntMap.IntMap (Map.Map (TxId C) ()))
@@ -378,12 +377,12 @@ txIxNestedInsert !im (TxIn !txId !txIx, !v) =
    in IntMap.alter f (fromIntegral txIx) im
 
 
-txIxSharingKeyMap ::
-     UTxOFold (IntMap.IntMap (KeyMap.KeyMap (Alonzo.TxOut CurrentEra)))
+txIxSharingKeyMap :: Fold (TxIn C, a) (IntMap.IntMap (KeyMap.KeyMap a))
 txIxSharingKeyMap = Fold txIxNestedInsertKeyMap mempty id
 
 txIxSharingKeyMap_ :: UTxOFold (IntMap.IntMap (KeyMap.KeyMap ()))
-txIxSharingKeyMap_ = Fold (\a v -> txIxNestedInsertKeyMap a (() <$ v)) mempty id
+txIxSharingKeyMap_ =
+  Fold ((\m (k, _) -> txIxNestedInsertKeyMap m (k, ()))) mempty id
 
 txIxNestedInsertKeyMap ::
      IntMap.IntMap (KeyMap.KeyMap a)
@@ -398,12 +397,11 @@ txIxNestedInsertKeyMap !m (TxInCompact32 x1 x2 x3 x4 txIx, !v) =
    in IntMap.alter f (fromIntegral txIx) m
 
 
-txIdSharingKeyMap ::
-     UTxOFold (KeyMap.KeyMap (IntMap.IntMap (Alonzo.TxOut CurrentEra)))
+txIdSharingKeyMap :: Fold (TxIn C, a) (KeyMap.KeyMap (IntMap.IntMap a))
 txIdSharingKeyMap = Fold txIdNestedInsertKeyMap KeyMap.Empty id
 
 txIdSharingKeyMap_ :: UTxOFold (KeyMap.KeyMap (IntMap.IntMap ()))
-txIdSharingKeyMap_ = Fold (\a v -> txIdNestedInsertKeyMap a (() <$ v)) KeyMap.Empty id
+txIdSharingKeyMap_ = Fold (\a (k, _) -> txIdNestedInsertKeyMap a (k, ())) KeyMap.Empty id
 
 txIdNestedInsertKeyMap ::
      KeyMap.KeyMap (IntMap.IntMap a)
@@ -417,7 +415,64 @@ txIdNestedInsertKeyMap !m (TxInCompact32 x1 x2 x3 x4 txIx, !a) =
            in KeyMap.insert key v m
         Just im ->
           let !v = IntMap.insert (fromIntegral txIx) a im
-           in KeyMap.insert key v $ KeyMap.delete key m
+           in KeyMap.insert key v m
+
+
+testKeyMap ::
+     KeyMap.KeyMap (IntMap.IntMap (Alonzo.TxOut CurrentEra))
+  -> Map.Map (TxIn C) (Alonzo.TxOut CurrentEra)
+  -> IO ()
+testKeyMap km m =
+  case Map.foldlWithKey' test km m of
+    KeyMap.Empty -> putStrLn "Tested UTxO equality: Pass"
+    _ -> error "Expected the KeyMap to be empty, but it's not."
+  where
+    test ::
+         KeyMap.KeyMap (IntMap.IntMap (Alonzo.TxOut CurrentEra))
+      -> TxIn C
+      -> Alonzo.TxOut CurrentEra
+      -> KeyMap.KeyMap (IntMap.IntMap (Alonzo.TxOut CurrentEra))
+    test acc txIn@(TxInCompact32 x1 x2 x3 x4 txIx) txOut =
+      let !key = KeyMap.Key x1 x2 x3 x4
+       in case KeyMap.lookupHM key acc of
+            Nothing -> error $ "Can't find txId: " <> show txIn
+            Just im ->
+              let txIx' = fromIntegral txIx
+                  im' = IntMap.delete txIx' im
+               in case IntMap.lookup txIx' im of
+                    Nothing -> error $ "Can't find txIx: " <> show txIn
+                    Just txOut'
+                      | txOut /= txOut' ->
+                        error $ "Found mismatching TxOuts for " <> show txIn
+                      | IntMap.null im' -> KeyMap.delete key acc
+                      | otherwise -> KeyMap.insert key im' acc
+
+
+-- instance HM.Hashable (TxIn C) where
+--   hashWithSalt _salt (TxInCompact32 x1 _ _ _ _) = fromIntegral x1
+--   hash (TxInCompact32 x1 _ _ _ _) = fromIntegral x1
+
+-- instance HM.Hashable (TxId C) where
+--   hashWithSalt _salt = hashTxId
+--   hash = hashTxId
+
+-- hashTxId :: TxId C -> Int
+-- hashTxId (TxId sh) =
+--   case HS.viewHash32 (SafeHash.extractHash sh) of
+--     HS.ViewHashNot32 -> error "irrelevant"
+--     HS.ViewHash32 a _ _ _ -> fromIntegral a
+
+-- nestedInsertHM ::
+--      IntMap.IntMap (KeyMap.KeyMap a)
+--   -> (TxIn C, a)
+--   -> IntMap.IntMap (KeyMap.KeyMap a)
+-- nestedInsertHM !m (TxInCompact32 x1 x2 x3 x4 txIx, !v) =
+--   let !key = KeyMap.Key x1 x2 x3 x4
+--       f =
+--         \case
+--           Nothing -> Just $! KeyMap.Leaf key v
+--           Just hm -> Just $! KeyMap.insert key v hm
+--    in IntMap.alter f (fromIntegral txIx) m
 
 
 -- nestedInsertHM' ::
@@ -433,80 +488,6 @@ txIdNestedInsertKeyMap !m (TxInCompact32 x1 x2 x3 x4 txIx, !a) =
 --         Just im ->
 --           let !v = IntMap.insert (fromIntegral txIx) a im
 --            in KeyMap.insert key v $ KeyMap.delete key hm
-
-
-
-
-instance HM.Hashable (TxIn C) where
-  hashWithSalt _salt (TxInCompact32 x1 _ _ _ _) = fromIntegral x1
-  hash (TxInCompact32 x1 _ _ _ _) = fromIntegral x1
-
-instance HM.Hashable (TxId C) where
-  hashWithSalt _salt = hashTxId
-  hash = hashTxId
-
-hashTxId :: TxId C -> Int
-hashTxId (TxId sh) =
-  case HS.viewHash32 (SafeHash.extractHash sh) of
-    HS.ViewHashNot32 -> error "irrelevant"
-    HS.ViewHash32 a _ _ _ -> fromIntegral a
-
-
--- loadUTxOuhm' :: FilePath -> IO (HM.HashMap (TxIn C) ())
--- loadUTxOuhm' fp = foldlUTxO fp (\ !m !(!k, _) -> HM.insert k () m) mempty
-
-
--- loadUTxOuhm'' :: FilePath -> IO (IntMap.IntMap (HM.HashMap (TxId C) ()))
--- loadUTxOuhm'' fp = foldlUTxO fp nestedInsert mempty
---   where
---     nestedInsert ::
---          IntMap.IntMap (HM.HashMap (TxId C) ())
---       -> (TxIn C, Alonzo.TxOut CurrentEra)
---       -> IntMap.IntMap (HM.HashMap (TxId C) ())
---     nestedInsert !m (TxIn txId txIx, _) =
---       let f =
---             \case
---               Nothing -> Just $! HM.singleton txId ()
---               Just hm -> Just $! HM.insert txId () hm
---        in IntMap.alter f (fromIntegral txIx) m
-
-
--- loadUTxO' :: FilePath -> IO (Map.Map (TxIn C) ())
--- loadUTxO' fp = foldlUTxO fp (\ !m !(!k, _) -> Map.insert k () m) mempty
-
--- loadUTxOni' :: FilePath -> IO (IntMap.IntMap (Map.Map (TxId C) ()))
--- loadUTxOni' fp = foldlUTxO fp (\m txin -> nestedInsertTxId m (() <$ txin)) mempty
-
-
-nestedInsertHM ::
-     IntMap.IntMap (KeyMap.KeyMap a)
-  -> (TxIn C, a)
-  -> IntMap.IntMap (KeyMap.KeyMap a)
-nestedInsertHM !m (TxInCompact32 x1 x2 x3 x4 txIx, !v) =
-  let !key = KeyMap.Key x1 x2 x3 x4
-      f =
-        \case
-          Nothing -> Just $! KeyMap.Leaf key v
-          Just hm -> Just $! KeyMap.insert key v hm
-   in IntMap.alter f (fromIntegral txIx) m
-
--- loadUTxOihm' :: FilePath -> IO (KeyMap.KeyMap (IntMap.IntMap ()))
--- loadUTxOihm' fp = foldlUTxO fp (\k v -> nestedInsertHM' k (() <$ v)) KeyMap.Empty
-
-
-nestedInsertHM' ::
-     KeyMap.KeyMap (IntMap.IntMap a)
-  -> (TxIn C, a)
-  -> KeyMap.KeyMap (IntMap.IntMap a)
-nestedInsertHM' !hm (TxInCompact32 x1 x2 x3 x4 txIx, !a) =
-  let !key = KeyMap.Key x1 x2 x3 x4
-   in case KeyMap.lookupHM key hm of
-        Nothing ->
-          let !v = IntMap.singleton (fromIntegral txIx) a
-           in KeyMap.insert key v hm
-        Just im ->
-          let !v = IntMap.insert (fromIntegral txIx) a im
-           in KeyMap.insert key v $ KeyMap.delete key hm
 
 totalADA :: Map.Map (TxIn C) (Alonzo.TxOut CurrentEra) -> Mary.Value C
 totalADA = foldMap (\(Alonzo.TxOut _ v _) -> v)

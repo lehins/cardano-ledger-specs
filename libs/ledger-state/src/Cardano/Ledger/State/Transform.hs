@@ -62,7 +62,7 @@ intern' k m =
     Just ix -> fst $ Map.elemAt ix m
 
 intern :: (Show k, Ord k) => k -> Map k a -> k
-intern !k = go
+intern k = go
   where
     go Tip = k
     go (Bin _ kx _ l r) =

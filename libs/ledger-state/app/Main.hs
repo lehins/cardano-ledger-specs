@@ -61,6 +61,10 @@ main = do
          (ShowHelpText Nothing)
          (long "help" <> short 'h' <> help "Display this message."))
       (header "ledger-state - Tool for analyzing ledger state")
+  forM_ (optsSqliteDbFile opts) $ \dbFp -> do
+    km <- loadDbUTxO txIdSharingKeyMap dbFp
+    m <- loadDbUTxO noSharing dbFp
+    testKeyMap km m
   forM_ (optsLedgerStateBinaryFile opts) $ \binFp -> do
     ls <- loadNewEpochState binFp
     forM_ (optsSqliteDbFile opts) $ \dbFp -> do
