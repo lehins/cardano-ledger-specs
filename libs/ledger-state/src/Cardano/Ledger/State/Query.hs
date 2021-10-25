@@ -178,15 +178,6 @@ insertEpochState Shelley.EpochState {..} = do
 
 -- Query database
 
--- selectMap
---   :: (MonadResource m, MonadReader SqlBackend m, Ord k) =>
---      [Filter record] -> (record -> m (k, a)) -> m (Map.Map k a)
--- selectMap
---   :: (MonadResource m, PersistQueryRead backend,
---       PersistEntity record,
---       mtl-2.2.2:Control.Monad.Reader.Class.MonadReader backend m, Ord k,
---       PersistEntityBackend record ~ BaseBackend backend) =>
---      [Filter record] -> (record -> m (k, a)) -> m (Map.Map k a)
 selectMap ::
      ( MonadResource m
      , Ord k
