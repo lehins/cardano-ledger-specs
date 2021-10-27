@@ -2,6 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TypeFamilies #-}
 
@@ -13,6 +14,7 @@ import qualified Cardano.Ledger.Keys as Keys
 import qualified Cardano.Ledger.Shelley.EpochBoundary as EpochBoundary
 import qualified Cardano.Ledger.Shelley.LedgerState as Shelley
 import qualified Cardano.Ledger.Shelley.UTxO as Shelley
+import Cardano.Ledger.State.Massiv
 import Cardano.Ledger.State.Orphans
 import Cardano.Ledger.State.Schema
 import Cardano.Ledger.State.Transform
@@ -24,10 +26,13 @@ import Control.Iterate.SetAlgebra
 import Control.Monad
 import Control.Monad.Trans.Reader
 import qualified Data.Compact.KeyMap as KeyMap
+import Data.Conduit.Internal (zipSources)
+import Data.Conduit.List (sourceList)
 import Data.Functor
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
-import Data.Text as T
+import qualified Data.Massiv.Array as A
+import qualified Data.Text as T
 import Database.Persist.Sqlite
 
 -- Populate database
@@ -178,6 +183,132 @@ insertEpochState Shelley.EpochState {..} = do
 
 -- Query database
 
+-- Into Massiv array
+
+selectKVVector ::
+  ( Ord k,
+    PersistEntity record,
+    PersistEntityBackend record ~ SqlBackend,
+    A.Manifest kr k,
+    A.Manifest vr v,
+    MonadUnliftIO m,
+    MonadResource m
+  ) =>
+  [Filter record] ->
+  (record -> ReaderT SqlBackend m (k, v)) ->
+  ReaderT SqlBackend m (KVVector kr vr k v)
+selectKVVector fs f = do
+  n <- count fs
+  A.createArray_ A.Seq (A.Sz1 n) $ \scheduler ma -> do
+    runConduit $
+      zipSources (sourceList [0 ..]) (selectSource fs [])
+        .| mapM_C
+          ( \(i, Entity _ a) -> do
+              (k, v) <- f a
+              liftIO $ A.write_ ma i (KVPair k v)
+          )
+    liftIO $ quicksortKVMArray_ scheduler ma
+{-# INLINE selectKVVector #-}
+
+getSnapShotNoSharingM ::
+  (MonadResource m, MonadUnliftIO m) =>
+  Key EpochState ->
+  SnapShotType ->
+  ReaderT SqlBackend m (SnapShotM C)
+getSnapShotNoSharingM epochStateId snapShotType = do
+  snapShotId <-
+    selectFirst
+      [SnapShotType ==. snapShotType, SnapShotEpochStateId ==. epochStateId]
+      []
+      <&> \case
+        Nothing -> error $ "Missing a snapshot: " ++ show snapShotType
+        Just (Entity snapShotId _) -> snapShotId
+  stake <-
+    selectKVVector [SnapShotStakeSnapShotId ==. snapShotId] $ \SnapShotStake {..} -> do
+      Credential credential <- getJust snapShotStakeCredentialId
+      pure (Keys.coerceKeyRole credential, snapShotStakeCoin)
+  delegations <-
+    selectKVVector [SnapShotDelegationSnapShotId ==. snapShotId] $ \SnapShotDelegation {..} -> do
+      Credential credential <- getJust snapShotDelegationCredentialId
+      KeyHash keyHash <- getJust snapShotDelegationKeyHash
+      --TODO ^ rename snapShotDelegationKeyHashId
+      pure (Keys.coerceKeyRole credential, Keys.coerceKeyRole keyHash)
+  poolParams <-
+    selectKVVector [SnapShotPoolSnapShotId ==. snapShotId] $ \SnapShotPool {..} -> do
+      KeyHash keyHash <- getJust snapShotPoolKeyHashId
+      pure (Keys.coerceKeyRole keyHash, snapShotPoolParams)
+  pure
+    SnapShotM
+      { ssStake = stake,
+        ssDelegations = delegations,
+        ssPoolParams = poolParams
+      }
+{-# INLINE getSnapShotNoSharingM #-}
+
+getSnapShotWithSharingM ::
+  (MonadResource m, MonadUnliftIO m) =>
+  [SnapShotM C] ->
+  Key EpochState ->
+  SnapShotType ->
+  ReaderT SqlBackend m (SnapShotM C)
+getSnapShotWithSharingM otherSnapShots epochStateId snapShotType = do
+  let otherStakes = ssStake <$> otherSnapShots
+  let otherPoolParams = ssPoolParams <$> otherSnapShots
+  let otherDelegations = ssDelegations <$> otherSnapShots
+  snapShotId <-
+    selectFirst
+      [SnapShotType ==. snapShotType, SnapShotEpochStateId ==. epochStateId]
+      []
+      <&> \case
+        Nothing -> error $ "Missing a snapshot: " ++ show snapShotType
+        Just (Entity snapShotId _) -> snapShotId
+  stake <-
+    selectKVVector [SnapShotStakeSnapShotId ==. snapShotId] $ \SnapShotStake {..} -> do
+      Credential credential <- getJust snapShotStakeCredentialId
+      pure
+        (internKVArrays (Keys.coerceKeyRole credential) otherStakes, snapShotStakeCoin)
+  poolParams <-
+    selectKVVector [SnapShotPoolSnapShotId ==. snapShotId] $ \SnapShotPool {..} -> do
+      KeyHash keyHash <- getJust snapShotPoolKeyHashId
+      pure
+        ( internKVArrays (Keys.coerceKeyRole keyHash) otherPoolParams,
+          snapShotPoolParams
+        )
+  delegations <-
+    selectKVVector [SnapShotDelegationSnapShotId ==. snapShotId] $ \SnapShotDelegation {..} -> do
+      Credential credential <- getJust snapShotDelegationCredentialId
+      KeyHash keyHash <- getJust snapShotDelegationKeyHash
+      pure
+        ( internKVArrays (Keys.coerceKeyRole credential) otherDelegations,
+          internKVArray (Keys.coerceKeyRole keyHash) poolParams
+        )
+  pure
+    SnapShotM
+      { ssStake = stake,
+        ssDelegations = delegations,
+        ssPoolParams = poolParams
+      }
+{-# INLINE getSnapShotWithSharingM #-}
+
+getSnapShotsWithSharingM ::
+  (MonadUnliftIO m, MonadResource m) =>
+  Entity EpochState ->
+  ReaderT SqlBackend m (SnapShotsM C)
+getSnapShotsWithSharingM (Entity epochStateId EpochState {epochStateSnapShotsFee}) = do
+  mark <- getSnapShotWithSharingM [] epochStateId SnapShotMark
+  set <- getSnapShotWithSharingM [mark] epochStateId SnapShotSet
+  go <- getSnapShotWithSharingM [mark, set] epochStateId SnapShotGo
+  pure $
+    SnapShotsM
+      { ssPstakeMark = mark,
+        ssPstakeSet = set,
+        ssPstakeGo = go,
+        ssFeeSS = epochStateSnapShotsFee
+      }
+{-# INLINE getSnapShotsWithSharingM #-}
+
+-- Into a Map structure
+
 selectMap ::
   ( MonadResource m,
     Ord k,
@@ -187,7 +318,7 @@ selectMap ::
   [Filter record] ->
   (record -> ReaderT SqlBackend m (k, a)) ->
   ReaderT SqlBackend m (Map.Map k a)
-selectMap fs f =
+selectMap fs f = do
   runConduit $
     selectSource fs [] .| mapMC (\(Entity _ a) -> f a)
       .| foldlC (\m (k, v) -> Map.insert k v m) mempty
@@ -241,6 +372,23 @@ getSnapShotsNoSharing (Entity epochStateId EpochState {epochStateSnapShotsFee}) 
         _pstakeGo = go,
         _feeSS = epochStateSnapShotsFee
       }
+
+getSnapShotsNoSharingM ::
+  (MonadResource m, MonadUnliftIO m) =>
+  Entity EpochState ->
+  ReaderT SqlBackend m (SnapShotsM C)
+getSnapShotsNoSharingM (Entity epochStateId EpochState {epochStateSnapShotsFee}) = do
+  mark <- getSnapShotNoSharingM epochStateId SnapShotMark
+  set <- getSnapShotNoSharingM epochStateId SnapShotSet
+  go <- getSnapShotNoSharingM epochStateId SnapShotGo
+  pure $
+    SnapShotsM
+      { ssPstakeMark = mark,
+        ssPstakeSet = set,
+        ssPstakeGo = go,
+        ssFeeSS = epochStateSnapShotsFee
+      }
+{-# INLINE getSnapShotsNoSharingM #-}
 
 getSnapShotWithSharing ::
   MonadResource m =>
@@ -334,7 +482,7 @@ foldDbUTxO ::
   -- | Empty acc
   a ->
   -- | Path to Sqlite db
-  Text ->
+  T.Text ->
   m a
 foldDbUTxO f m fp = runSqlite fp (runConduit (sourceUTxO .| foldlC f m))
 
@@ -351,7 +499,7 @@ foldDbUTxO f m fp = runSqlite fp (runConduit (sourceUTxO .| foldlC f m))
 --   -> Int64
 --   -> (a -> (TxIn.TxIn C, Alonzo.TxOut CurrentEra) -> a) -- ^ Folding function
 --   -> a -- ^ Empty acc
---   -> Text -- ^ Path to Sqlite db
+--   -> T.Text -- ^ Path to Sqlite db
 --   -> m a
 -- foldDbUTxOr b t f m fp = runSqlite fp (runConduit (sourceUTxOr b t .| foldlC f m))
 
@@ -488,17 +636,17 @@ getDStateWithSharing dstateId = do
             }
       }
 
-loadDStateNoSharing :: MonadUnliftIO m => Text -> m (Shelley.DState C)
+loadDStateNoSharing :: MonadUnliftIO m => T.Text -> m (Shelley.DState C)
 loadDStateNoSharing fp =
   runSqlite fp $ getDStateNoSharing (DStateKey (SqlBackendKey 1))
 
 loadUTxONoSharing ::
-  MonadUnliftIO m => Text -> m (Shelley.UTxO CurrentEra)
+  MonadUnliftIO m => T.Text -> m (Shelley.UTxO CurrentEra)
 loadUTxONoSharing fp =
   runSqlite fp (Shelley.UTxO <$> runConduitFold sourceUTxO noSharing)
 
 getLedgerStateNoSharing ::
-  MonadUnliftIO m => Text -> m (Shelley.LedgerState CurrentEra)
+  MonadUnliftIO m => T.Text -> m (Shelley.LedgerState CurrentEra)
 getLedgerStateNoSharing fp =
   runSqlite fp $ do
     ledgerState@LedgerState {..} <- getJust lsId
@@ -507,7 +655,7 @@ getLedgerStateNoSharing fp =
     getLedgerState (Shelley.UTxO m) ledgerState dstate
 
 getLedgerStateDStateSharing ::
-  MonadUnliftIO m => Text -> m (Shelley.LedgerState CurrentEra)
+  MonadUnliftIO m => T.Text -> m (Shelley.LedgerState CurrentEra)
 getLedgerStateDStateSharing fp =
   runSqlite fp $ do
     ledgerState@LedgerState {..} <- getJust lsId
@@ -517,7 +665,7 @@ getLedgerStateDStateSharing fp =
 
 getLedgerStateDStateTxIxSharing ::
   MonadUnliftIO m =>
-  Text ->
+  T.Text ->
   m
     ( Shelley.LedgerState CurrentEra,
       IntMap.IntMap (Map.Map (TxIn.TxId C) (Alonzo.TxOut CurrentEra))
@@ -532,7 +680,7 @@ getLedgerStateDStateTxIxSharing fp =
 
 getLedgerStateDStateTxIxSharingKeyMap ::
   MonadUnliftIO m =>
-  Text ->
+  T.Text ->
   m
     ( Shelley.LedgerState CurrentEra,
       IntMap.IntMap (KeyMap.KeyMap (Alonzo.TxOut CurrentEra))
@@ -547,7 +695,7 @@ getLedgerStateDStateTxIxSharingKeyMap fp =
 
 getLedgerStateDStateTxIdSharingKeyMap ::
   MonadUnliftIO m =>
-  Text ->
+  T.Text ->
   m
     ( Shelley.LedgerState CurrentEra,
       KeyMap.KeyMap (IntMap.IntMap (Alonzo.TxOut CurrentEra))
@@ -561,39 +709,47 @@ getLedgerStateDStateTxIdSharingKeyMap fp =
     pure (ls, m)
 
 -- storeLedgerState ::
---      MonadUnliftIO m => Text -> Shelley.LedgerState CurrentEra -> m ()
+--      MonadUnliftIO m => T.Text -> Shelley.LedgerState CurrentEra -> m ()
 -- storeLedgerState fp ls =
 --   runSqlite fp $ do
 --     runMigration migrateAll
 --     insertLedgerState ls
 
 storeEpochState ::
-  MonadUnliftIO m => Text -> Shelley.EpochState CurrentEra -> m ()
+  MonadUnliftIO m => T.Text -> Shelley.EpochState CurrentEra -> m ()
 storeEpochState fp es =
   runSqlite fp $ do
     runMigration migrateAll
     insertEpochState es
 
-loadDbUTxO :: UTxOFold a -> Text -> IO a
+loadDbUTxO :: UTxOFold a -> T.Text -> IO a
 loadDbUTxO (Fold f e g) fp = runSqlite fp (g <$> runConduit (sourceUTxO .| foldlC f e))
 
 esId :: Key EpochState
 esId = EpochStateKey (SqlBackendKey 1)
 
-loadEpochStateEntity :: MonadUnliftIO m => Text -> m (Entity EpochState)
+loadEpochStateEntity :: MonadUnliftIO m => T.Text -> m (Entity EpochState)
 loadEpochStateEntity fp = runSqlite fp (getJustEntity esId)
 
 loadSnapShotsNoSharing ::
-  MonadUnliftIO m => Text -> Entity EpochState -> m (EpochBoundary.SnapShots C)
+  MonadUnliftIO m => T.Text -> Entity EpochState -> m (EpochBoundary.SnapShots C)
 loadSnapShotsNoSharing fp = runSqlite fp . getSnapShotsNoSharing
 
+loadSnapShotsNoSharingM :: T.Text -> Entity EpochState -> IO (SnapShotsM C)
+loadSnapShotsNoSharingM fp = runSqlite fp . getSnapShotsNoSharingM
+{-# INLINE loadSnapShotsNoSharingM #-}
+
+loadSnapShotsWithSharingM :: T.Text -> Entity EpochState -> IO (SnapShotsM C)
+loadSnapShotsWithSharingM fp = runSqlite fp . getSnapShotsWithSharingM
+{-# INLINE loadSnapShotsWithSharingM #-}
+
 loadSnapShotsWithSharing ::
-  MonadUnliftIO m => Text -> Entity EpochState -> m (EpochBoundary.SnapShots C)
+  MonadUnliftIO m => T.Text -> Entity EpochState -> m (EpochBoundary.SnapShots C)
 loadSnapShotsWithSharing fp = runSqlite fp . getSnapShotsWithSharing
 
 -- getLedgerStateWithSharing ::
 --      MonadUnliftIO m
---   => Text
+--   => T.Text
 --   -> m (Shelley.LedgerState CurrentEra, IntMap.IntMap (Map.Map (TxIn.TxId C) TxOut'))
 -- getLedgerStateWithSharing fp =
 --   runSqlite fp $ do
@@ -606,7 +762,7 @@ loadSnapShotsWithSharing fp = runSqlite fp . getSnapShotsWithSharing
 
 -- getLedgerStateDStateTxOutSharing ::
 --      MonadUnliftIO m
---   => Text
+--   => T.Text
 --   -> m (Shelley.LedgerState CurrentEra, Map.Map (TxIn.TxIn C) TxOut')
 -- getLedgerStateDStateTxOutSharing fp =
 --   runSqlite fp $ do
@@ -619,7 +775,7 @@ loadSnapShotsWithSharing fp = runSqlite fp . getSnapShotsWithSharing
 
 -- getLedgerStateTxOutSharing ::
 --      MonadUnliftIO m
---   => Text
+--   => T.Text
 --   -> m (Shelley.LedgerState CurrentEra, Map.Map (TxIn.TxIn C) TxOut')
 -- getLedgerStateTxOutSharing fp =
 --   runSqlite fp $ do
@@ -632,7 +788,7 @@ loadSnapShotsWithSharing fp = runSqlite fp . getSnapShotsWithSharing
 
 -- getLedgerStateWithSharingKeyMap ::
 --      MonadUnliftIO m
---   => Text
+--   => T.Text
 --   -> m (Shelley.LedgerState CurrentEra, IntMap.IntMap (KeyMap.KeyMap TxOut'))
 -- getLedgerStateWithSharingKeyMap fp =
 --   runSqlite fp $ do

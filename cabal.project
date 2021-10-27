@@ -98,6 +98,22 @@ source-repository-package
   tag: ee59880f47ab835dbd73bea0847dab7869fc20d8
   --sha256: 1lrzknw765pz2j97nvv9ip3l1mcpf2zr4n56hwlz0rk7wq7ls4cm
 
+source-repository-package
+  type: git
+  location: https://github.com/lehins/massiv.git
+  tag: 5548216020de5790775b930387d57756f1f67625
+  --sha256: 18ga5w5g0dn6zwfmw9h0903240nq928zizw2a09zqfk0m7akqgaw
+  subdir:
+    massiv
+
+source-repository-package
+  type: git
+  location: https://github.com/lehins/scheduler.git
+  tag: 04e32489695360f8004c3397cbc041730d610125
+  --sha256: 1bj5v3df2bzx4s7c2niid8lkvj0hdgsm60yz71pj13ch88m7brfd
+  subdir:
+    scheduler
+
 allow-newer:
   monoidal-containers:aeson,
   size-based:template-haskell,

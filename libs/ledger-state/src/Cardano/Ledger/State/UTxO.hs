@@ -24,26 +24,20 @@ import qualified Cardano.Ledger.Mary.Value as Mary
 import Cardano.Ledger.Shelley.API
 import Cardano.Ledger.Shelley.LedgerState
 import Cardano.Ledger.Shelley.Rewards
-import Cardano.Protocol.TPraos (individualPoolStakeVrf)
+import Cardano.Ledger.PoolDistr (individualPoolStakeVrf)
 import Codec.CBOR.Read (deserialiseFromBytes)
 import Conduit
 import Control.Exception (throwIO)
 import Control.Foldl (Fold (..))
 import Control.Iterate.SetAlgebra (range)
 import Control.Monad
-import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as LBS
 import Data.Compact.KeyMap as KeyMap hiding (Stat)
-import qualified Data.Conduit.List as C
 import Data.Foldable as F
 import Data.Functor
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
-import Data.Proxy
 import qualified Data.Set as Set
-import qualified Data.Text as T
-import qualified Data.Text.Encoding as T
-import qualified Data.Text.Read as T
 import Data.Typeable
 import Numeric.Natural
 import Prettyprinter
