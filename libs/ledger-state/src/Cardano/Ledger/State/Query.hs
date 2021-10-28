@@ -24,7 +24,10 @@ import Conduit
 import Control.Foldl (Fold (..))
 import Control.Iterate.SetAlgebra
 import Control.Monad
+import Control.Scheduler
 import Control.Monad.Trans.Reader
+--import Data.Compact.KVVector
+import Data.Compact.KVArray
 import qualified Data.Compact.KeyMap as KeyMap
 import Data.Conduit.Internal (zipSources)
 import Data.Conduit.List (sourceList)
@@ -32,8 +35,11 @@ import Data.Functor
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import qualified Data.Massiv.Array as A
+import qualified Data.Massiv.Array.Unsafe as A
 import qualified Data.Text as T
 import Database.Persist.Sqlite
+-- import qualified Data.Vector.Generic as VG
+-- import qualified Data.Vector.Generic.Mutable as VGM
 
 -- Populate database
 
@@ -191,7 +197,6 @@ selectKVVector ::
     PersistEntityBackend record ~ SqlBackend,
     A.Manifest kr k,
     A.Manifest vr v,
-    MonadUnliftIO m,
     MonadResource m
   ) =>
   [Filter record] ->
@@ -199,19 +204,46 @@ selectKVVector ::
   ReaderT SqlBackend m (KVVector kr vr k v)
 selectKVVector fs f = do
   n <- count fs
-  A.createArray_ A.Seq (A.Sz1 n) $ \scheduler ma -> do
-    runConduit $
-      zipSources (sourceList [0 ..]) (selectSource fs [])
-        .| mapM_C
-          ( \(i, Entity _ a) -> do
-              (k, v) <- f a
-              liftIO $ A.write_ ma i (KVPair k v)
-          )
-    liftIO $ quicksortKVMArray_ scheduler ma
+  mv <- liftIO $ A.unsafeNew (A.Sz1 n)
+  runConduit $
+    zipSources (sourceList [0 ..]) (selectSource fs []) .|
+    mapM_C
+      (\(i, Entity _ a) -> do
+         (k, v) <- f a
+         liftIO $ A.write_ mv i (KVPair k v))
+  liftIO $ do
+    sortKVMArray_ trivialScheduler_ mv
+    A.unsafeFreeze A.Seq mv
 {-# INLINE selectKVVector #-}
 
+
+-- selectKVVector ::
+--   ( Ord k,
+--     PersistEntity record,
+--     PersistEntityBackend record ~ SqlBackend,
+--     VG.Vector kv k,
+--     VG.Vector vv v,
+--     MonadResource m
+--   ) =>
+--   [Filter record] ->
+--   (record -> ReaderT SqlBackend m (k, v)) ->
+--   ReaderT SqlBackend m (KVVector kv vv (KVPair k v))
+-- selectKVVector fs f = do
+--   n <- count fs
+--   mv <- liftIO $ VGM.unsafeNew n
+--   runConduit $
+--     zipSources (sourceList [0 ..]) (selectSource fs []) .|
+--     mapM_C
+--       (\(i, Entity _ a) -> do
+--          (k, v) <- f a
+--          liftIO $ VGM.write mv i (KVPair k v))
+--   liftIO $ do
+--     sortKVMArray_ mv
+--     VG.unsafeFreeze mv
+-- {-# INLINE selectKVVector #-}
+
 getSnapShotNoSharingM ::
-  (MonadResource m, MonadUnliftIO m) =>
+  MonadResource m =>
   Key EpochState ->
   SnapShotType ->
   ReaderT SqlBackend m (SnapShotM C)
@@ -246,7 +278,7 @@ getSnapShotNoSharingM epochStateId snapShotType = do
 {-# INLINE getSnapShotNoSharingM #-}
 
 getSnapShotWithSharingM ::
-  (MonadResource m, MonadUnliftIO m) =>
+  MonadResource m =>
   [SnapShotM C] ->
   Key EpochState ->
   SnapShotType ->
@@ -266,12 +298,12 @@ getSnapShotWithSharingM otherSnapShots epochStateId snapShotType = do
     selectKVVector [SnapShotStakeSnapShotId ==. snapShotId] $ \SnapShotStake {..} -> do
       Credential credential <- getJust snapShotStakeCredentialId
       pure
-        (internKVArrays (Keys.coerceKeyRole credential) otherStakes, snapShotStakeCoin)
+        (internKVVectors (Keys.coerceKeyRole credential) otherStakes, snapShotStakeCoin)
   poolParams <-
     selectKVVector [SnapShotPoolSnapShotId ==. snapShotId] $ \SnapShotPool {..} -> do
       KeyHash keyHash <- getJust snapShotPoolKeyHashId
       pure
-        ( internKVArrays (Keys.coerceKeyRole keyHash) otherPoolParams,
+        ( internKVVectors (Keys.coerceKeyRole keyHash) otherPoolParams,
           snapShotPoolParams
         )
   delegations <-
@@ -279,8 +311,8 @@ getSnapShotWithSharingM otherSnapShots epochStateId snapShotType = do
       Credential credential <- getJust snapShotDelegationCredentialId
       KeyHash keyHash <- getJust snapShotDelegationKeyHash
       pure
-        ( internKVArrays (Keys.coerceKeyRole credential) otherDelegations,
-          internKVArray (Keys.coerceKeyRole keyHash) poolParams
+        ( internKVVectors (Keys.coerceKeyRole credential) otherDelegations,
+          internKVVector (Keys.coerceKeyRole keyHash) poolParams
         )
   pure
     SnapShotM
@@ -291,7 +323,7 @@ getSnapShotWithSharingM otherSnapShots epochStateId snapShotType = do
 {-# INLINE getSnapShotWithSharingM #-}
 
 getSnapShotsWithSharingM ::
-  (MonadUnliftIO m, MonadResource m) =>
+  MonadResource m =>
   Entity EpochState ->
   ReaderT SqlBackend m (SnapShotsM C)
 getSnapShotsWithSharingM (Entity epochStateId EpochState {epochStateSnapShotsFee}) = do
@@ -322,6 +354,7 @@ selectMap fs f = do
   runConduit $
     selectSource fs [] .| mapMC (\(Entity _ a) -> f a)
       .| foldlC (\m (k, v) -> Map.insert k v m) mempty
+{-# INLINE selectMap #-}
 
 getSnapShotNoSharing ::
   MonadResource m =>
@@ -356,6 +389,7 @@ getSnapShotNoSharing epochStateId snapShotType = do
         _delegations = delegations,
         _poolParams = poolParams
       }
+{-# INLINE getSnapShotNoSharing #-}
 
 getSnapShotsNoSharing ::
   MonadResource m =>
@@ -372,9 +406,10 @@ getSnapShotsNoSharing (Entity epochStateId EpochState {epochStateSnapShotsFee}) 
         _pstakeGo = go,
         _feeSS = epochStateSnapShotsFee
       }
+{-# INLINE getSnapShotsNoSharing #-}
 
 getSnapShotsNoSharingM ::
-  (MonadResource m, MonadUnliftIO m) =>
+  MonadResource m =>
   Entity EpochState ->
   ReaderT SqlBackend m (SnapShotsM C)
 getSnapShotsNoSharingM (Entity epochStateId EpochState {epochStateSnapShotsFee}) = do
@@ -434,6 +469,7 @@ getSnapShotWithSharing otherSnapShots epochStateId snapShotType = do
         _delegations = delegations,
         _poolParams = poolParams
       }
+{-# INLINE getSnapShotWithSharing #-}
 
 getSnapShotsWithSharing ::
   MonadResource m =>
@@ -450,6 +486,7 @@ getSnapShotsWithSharing (Entity epochStateId EpochState {epochStateSnapShotsFee}
         _pstakeGo = go,
         _feeSS = epochStateSnapShotsFee
       }
+{-# INLINE getSnapShotsWithSharing #-}
 
 sourceUTxO ::
   MonadResource m =>
@@ -734,6 +771,12 @@ loadEpochStateEntity fp = runSqlite fp (getJustEntity esId)
 loadSnapShotsNoSharing ::
   MonadUnliftIO m => T.Text -> Entity EpochState -> m (EpochBoundary.SnapShots C)
 loadSnapShotsNoSharing fp = runSqlite fp . getSnapShotsNoSharing
+{-# INLINE loadSnapShotsNoSharing #-}
+
+loadSnapShotsWithSharing ::
+  MonadUnliftIO m => T.Text -> Entity EpochState -> m (EpochBoundary.SnapShots C)
+loadSnapShotsWithSharing fp = runSqlite fp . getSnapShotsWithSharing
+{-# INLINE loadSnapShotsWithSharing #-}
 
 loadSnapShotsNoSharingM :: T.Text -> Entity EpochState -> IO (SnapShotsM C)
 loadSnapShotsNoSharingM fp = runSqlite fp . getSnapShotsNoSharingM
@@ -742,10 +785,6 @@ loadSnapShotsNoSharingM fp = runSqlite fp . getSnapShotsNoSharingM
 loadSnapShotsWithSharingM :: T.Text -> Entity EpochState -> IO (SnapShotsM C)
 loadSnapShotsWithSharingM fp = runSqlite fp . getSnapShotsWithSharingM
 {-# INLINE loadSnapShotsWithSharingM #-}
-
-loadSnapShotsWithSharing ::
-  MonadUnliftIO m => T.Text -> Entity EpochState -> m (EpochBoundary.SnapShots C)
-loadSnapShotsWithSharing fp = runSqlite fp . getSnapShotsWithSharing
 
 -- getLedgerStateWithSharing ::
 --      MonadUnliftIO m

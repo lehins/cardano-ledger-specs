@@ -31,16 +31,21 @@ library
 
   exposed-modules:     Data.Compact.KeyMap
                      , Data.Compact.HashMap
+                     , Data.Compact.KVVector
+                     , Data.Compact.KVArray
   other-modules:       Data.Compact.Class
   build-depends:       base >=4.11 && <5
                      , array
                      , containers
                      , deepseq
+                     , massiv
                      , prettyprinter
                      , primitive
                      , random
                      , text
                      , cardano-prelude
+                     , vector
+                     , vector-algorithms
   hs-source-dirs:      src
 
 test-suite tests

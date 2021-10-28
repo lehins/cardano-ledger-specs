@@ -4,7 +4,7 @@
 module Main where
 
 import Cardano.Ledger.State.Query
-import Cardano.Ledger.State.UTxO
+--import Cardano.Ledger.State.UTxO
 import Control.Monad
 import qualified Data.Text as T
 import Options.Applicative as O
@@ -37,15 +37,6 @@ optsParser =
             ("Run various benchmarks on LedgerState representations")
       )
 
--- io :: NFData a => String -> (t -> IO a) -> t -> Weigh ()
--- io name act = io name act'
---   where
---     act' arg = do
---       t0 <- getTime
---       r <- act arg
---       t1 <- getTime
---       r <$ putStrLn (name <> printf " - done: %.2fs" (t1 - t0))
-
 main :: IO ()
 main = do
   opts <-
@@ -57,7 +48,7 @@ main = do
               (long "help" <> short 'h' <> help "Display this message.")
         )
         (header "ledger-state:memory - Tool for analyzing memory consumption of ledger state")
-  let cols = [Case, Max, MaxOS, Live, Allocated, GCs]
+  let cols = [Case, Max, MaxOS, Live, Allocated, GCs, WallTime]
   !mEpochStateEntity <- mapM (loadEpochStateEntity . T.pack) (optsSqliteDbFile opts)
   mainWith $ do
     setColumns cols

@@ -44,9 +44,8 @@ library
                     , deepseq
                     , foldl
                     , massiv
-                    -- , vector
-                    , primitive
-                    -- , contiguous
+                    , scheduler
+                    , vector
                     , persistent
                     , persistent-sqlite
                     , persistent-template
@@ -83,6 +82,7 @@ benchmark memory
   hs-source-dirs: bench
   build-depends:  base
                 , deepseq
+                , weigh
                 , ledger-state
                 , optparse-applicative
                 , text

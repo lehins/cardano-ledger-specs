@@ -29,6 +29,8 @@ import Data.Monoid (Sum (..))
 import Data.PartialOrd (PartialOrd)
 import Data.Typeable (Typeable)
 import Data.Word (Word64)
+import Foreign.Ptr
+import Foreign.Storable
 import GHC.Generics (Generic)
 import NoThunks.Class (NoThunks (..))
 import Quiet
@@ -86,9 +88,23 @@ integerToWord64 c
   | c < 0 = Nothing
   | c > fromIntegral (maxBound :: Word64) = Nothing
   | otherwise = Just $ fromIntegral c
+{-# INLINE integerToWord64 #-}
 
 instance ToCBOR (CompactForm Coin) where
   toCBOR (CompactCoin c) = toCBOR c
 
 instance FromCBOR (CompactForm Coin) where
   fromCBOR = CompactCoin <$> fromCBOR
+
+instance Storable Coin where
+  sizeOf _ = sizeOf (undefined :: Word64)
+  {-# INLINE sizeOf #-}
+  alignment _ = alignment (undefined :: Word64)
+  {-# INLINE alignment #-}
+  poke ptr (Coin c) =
+    case integerToWord64 c of
+      Nothing -> error $ "Impossible Coin overflow: " ++ show c
+      Just w -> poke (castPtr ptr) w
+  {-# INLINE poke #-}
+  peek ptr = Coin . fromIntegral <$> peek (castPtr ptr :: Ptr Word64)
+  {-# INLINE peek #-}
