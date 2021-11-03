@@ -568,14 +568,12 @@ getLedgerStateDStateTxOutSharingKeyMap fp =
         txOut' :: Alonzo.TxOut CurrentEra
         txOut' =
           case txOut of
-            Alonzo.TxOut_AddrHash28_AdaOnly sr a b c d ada
-              | Credential.StakeRefBase sa <- sr ->
-                let sr' = Credential.StakeRefBase (intern sa delegs)
-                 in Alonzo.TxOut_AddrHash28_AdaOnly sr' a b c d ada
-            Alonzo.TxOut_AddrHash28_AdaOnly_DataHash32 sr a b c d ada e f g h
-              | Credential.StakeRefBase sa <- sr ->
-                let sr' = Credential.StakeRefBase (intern sa delegs)
-                 in Alonzo.TxOut_AddrHash28_AdaOnly_DataHash32 sr' a b c d ada e f g h
+            Alonzo.TxOut_AddrHash28_AdaOnly sc a b c d ada ->
+                let sc' = intern sc delegs
+                 in Alonzo.TxOut_AddrHash28_AdaOnly sc' a b c d ada
+            Alonzo.TxOut_AddrHash28_AdaOnly_DataHash32 sc a b c d ada e f g h ->
+                let sc' = intern sc delegs
+                 in Alonzo.TxOut_AddrHash28_AdaOnly_DataHash32 sc' a b c d ada e f g h
             _ -> txOut
 
 getLedgerStateDStateTxOutNoSharingKeyMap ::

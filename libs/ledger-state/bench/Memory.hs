@@ -70,10 +70,9 @@ main = do
       --   io "IntMap (Map TxId ())" (loadDbUTxO txIxSharing_) dbFp
       --   io "Map TxIn ()" (loadDbUTxO noSharing_) dbFp
       wgroup "LedgerState" $ do
-        wgroup "UTxO (Share DState)" $ do
-          io "IntMap (KeyMap TxId TxOut)" getLedgerStateDStateTxIxSharingKeyMap dbFp
-          io "IntMap (KeyMap TxId TxOut) - uncompacted" getLedgerStateDStateTxOutNoSharingKeyMap dbFp
-          io "IntMap (KeyMap TxId TxOut) - sharing" getLedgerStateDStateTxOutSharingKeyMap dbFp
+          io "Original TxOut" getLedgerStateDStateTxOutNoSharingKeyMap dbFp
+          io "Adjusted TxOut no sharing" getLedgerStateDStateTxIxSharingKeyMap dbFp
+          io "Adjusted TxOut with sharing" getLedgerStateDStateTxOutSharingKeyMap dbFp
       --     io "KeyMap TxId (IntMap TxOut)" getLedgerStateDStateTxIdSharingKeyMap dbFp
       --     io "IntMap (Map TxId TxOut)" getLedgerStateDStateTxIxSharing dbFp
       --     io "Map TxIn TxOut" getLedgerStateDStateSharing dbFp
