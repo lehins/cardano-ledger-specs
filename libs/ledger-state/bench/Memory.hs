@@ -69,9 +69,11 @@ main = do
       --   io "KeyMap TxId (IntMap TxId ())" (loadDbUTxO txIdSharingKeyMap_) dbFp
       --   io "IntMap (Map TxId ())" (loadDbUTxO txIxSharing_) dbFp
       --   io "Map TxIn ()" (loadDbUTxO noSharing_) dbFp
-      -- wgroup "LedgerState" $ do
-      --   wgroup "UTxO (Share DState)" $ do
-      --     io "IntMap (KeyMap TxId TxOut)" getLedgerStateDStateTxIxSharingKeyMap dbFp
+      wgroup "LedgerState" $ do
+        wgroup "UTxO (Share DState)" $ do
+          io "IntMap (KeyMap TxId TxOut)" getLedgerStateDStateTxIxSharingKeyMap dbFp
+          io "IntMap (KeyMap TxId TxOut) - uncompacted" getLedgerStateDStateTxOutNoSharingKeyMap dbFp
+          io "IntMap (KeyMap TxId TxOut) - sharing" getLedgerStateDStateTxOutSharingKeyMap dbFp
       --     io "KeyMap TxId (IntMap TxOut)" getLedgerStateDStateTxIdSharingKeyMap dbFp
       --     io "IntMap (Map TxId TxOut)" getLedgerStateDStateTxIxSharing dbFp
       --     io "Map TxIn TxOut" getLedgerStateDStateSharing dbFp
@@ -81,8 +83,8 @@ main = do
       --     io "SnapShots (Vector) - with sharing" (loadSnapShotsWithSharingM dbFp) ese
       --     io "SnapShots - no sharing" (loadSnapShotsNoSharing dbFp) ese
       --     io "SnapShots - with sharing" (loadSnapShotsWithSharing dbFp) ese
-      wgroup "UTxO (TxOut)" $ do
-        io "IntMap (KeyMap TxId TxOut)" (loadDbUTxO txIxSharingKeyMap) dbFp
-        io "KeyMap TxId (IntMap TxId TxOut)" (loadDbUTxO txIdSharingKeyMap) dbFp
-        io "IntMap (Map TxId TxOut)" (loadDbUTxO txIxSharing) dbFp
-        io "Map TxIn TxOut" (loadDbUTxO noSharing) dbFp
+      -- wgroup "UTxO (TxOut)" $ do
+      --   io "IntMap (KeyMap TxId TxOut)" (loadDbUTxO txIxSharingKeyMap) dbFp
+      --   io "KeyMap TxId (IntMap TxId TxOut)" (loadDbUTxO txIdSharingKeyMap) dbFp
+      --   io "IntMap (Map TxId TxOut)" (loadDbUTxO txIxSharing) dbFp
+      --   io "Map TxIn TxOut" (loadDbUTxO noSharing) dbFp

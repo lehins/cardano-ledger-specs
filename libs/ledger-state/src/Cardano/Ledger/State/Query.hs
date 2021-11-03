@@ -545,6 +545,62 @@ getLedgerStateDStateTxIxSharingKeyMap fp =
     ls <- getLedgerState (Shelley.UTxO mempty) ledgerState dstate
     pure (ls, m)
 
+getLedgerStateDStateTxOutSharingKeyMap ::
+  MonadUnliftIO m =>
+  Text ->
+  m
+    ( Shelley.LedgerState CurrentEra,
+      IntMap.IntMap (KeyMap.KeyMap (Alonzo.TxOut CurrentEra))
+    )
+getLedgerStateDStateTxOutSharingKeyMap fp =
+  runSqlite fp $ do
+    ledgerState@LedgerState {..} <- getJust lsId
+    dstate <- getDStateWithSharing ledgerStateDstateId
+    m <-
+      runConduitFold
+        (sourceUTxO .| mapC (shareStaking (Shelley._delegations dstate)))
+        txIxSharingKeyMap
+    ls <- getLedgerState (Shelley.UTxO mempty) ledgerState dstate
+    pure (ls, m)
+  where
+    shareStaking delegs (txIn, txOut) = (txIn, txOut')
+      where
+        txOut' :: Alonzo.TxOut CurrentEra
+        txOut' =
+          case txOut of
+            Alonzo.TxOut_AddrHash28_AdaOnly sr a b c d ada
+              | Credential.StakeRefBase sa <- sr ->
+                let sr' = Credential.StakeRefBase (intern sa delegs)
+                 in Alonzo.TxOut_AddrHash28_AdaOnly sr' a b c d ada
+            Alonzo.TxOut_AddrHash28_AdaOnly_DataHash32 sr a b c d ada e f g h
+              | Credential.StakeRefBase sa <- sr ->
+                let sr' = Credential.StakeRefBase (intern sa delegs)
+                 in Alonzo.TxOut_AddrHash28_AdaOnly_DataHash32 sr' a b c d ada e f g h
+            _ -> txOut
+
+getLedgerStateDStateTxOutNoSharingKeyMap ::
+  MonadUnliftIO m =>
+  Text ->
+  m
+    ( Shelley.LedgerState CurrentEra,
+      IntMap.IntMap (KeyMap.KeyMap (Alonzo.TxOut CurrentEra))
+    )
+getLedgerStateDStateTxOutNoSharingKeyMap fp =
+  runSqlite fp $ do
+    ledgerState@LedgerState {..} <- getJust lsId
+    dstate <- getDStateWithSharing ledgerStateDstateId
+    m <- runConduitFold (sourceUTxO .| mapC uncompact) txIxSharingKeyMap
+    ls <- getLedgerState (Shelley.UTxO mempty) ledgerState dstate
+    pure (ls, m)
+  where
+    uncompact (txIn, txOut) = (txIn, txOut')
+      where
+        txOut' :: Alonzo.TxOut CurrentEra
+        txOut' =
+          case txOut of
+            Alonzo.TxOutCompact a v -> Alonzo.TxOutCompact' a v
+            Alonzo.TxOutCompactDH a v d -> Alonzo.TxOutCompactDH' a v d
+
 getLedgerStateDStateTxIdSharingKeyMap ::
   MonadUnliftIO m =>
   Text ->
