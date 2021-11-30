@@ -30,24 +30,12 @@ import Test.Tasty.QuickCheck
 
 -- ==============================================================
 
-instance Uniform Key where
-  uniformM g = do
-    w0 <- uniformM g
-    w1 <- uniformM g
-    w2 <- uniformM g
-    w3 <- uniformM g
-    pure (Key w0 w1 w2 w3)
-
 instance Arbitrary Key where
   arbitrary =
     oneof
       [ Key <$> arbitrary <*> arbitrary <*> arbitrary <*> arbitrary,
         Key <$> chooseAny <*> chooseAny <*> chooseAny <*> chooseAny
       ]
-
-instance HM.Keyed Key where
-  toKey = id
-  fromKey = id
 
 instance Arbitrary a => Arbitrary (KeyMap a) where
   arbitrary = do
