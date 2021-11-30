@@ -8,7 +8,34 @@
 {-# LANGUAGE UnboxedTuples #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module Data.Compact.KeyMap where
+module Data.Compact.KeyMap
+  ( KeyMap,
+    Key (..),
+    size,
+    lookup,
+    lookupMax,
+    lookupMin,
+    splitLookup,
+    insert,
+    insertWith,
+    insertWithKey,
+    delete,
+    mapWithKey,
+    restrictKeys,
+    withoutKeys,
+    intersection,
+    intersectionWith,
+    intersectionWithKey,
+    union,
+    unionWith,
+    unionWithKey,
+    foldWithAscKey,
+    foldWithDescKey,
+    fromList,
+    toList,
+    ppKeyMap,
+  )
+where
 
 import Cardano.Prelude (Generic, HeapWords (..), ST, runST)
 import Control.DeepSeq (NFData (..))
@@ -50,6 +77,7 @@ import GHC.Exts (isTrue#, reallyUnsafePtrEquality#, (==#))
 import Prettyprinter
 import qualified Prettyprinter.Internal as Pretty
 import System.Random.Stateful (Uniform (..))
+import Prelude hiding (lookup)
 
 -- ==========================================================================
 -- bitsPerSegment, Segments, Paths. Breaking a Key into a sequence of small components
@@ -109,14 +137,6 @@ instance Uniform Key where
     w2 <- uniformM g
     w3 <- uniformM g
     pure (Key w0 w1 w2 w3)
-
--- | The number of Word64 per key
-wordsPerKey :: Int
-wordsPerKey = 4
-
--- | The length of a Path for a Key (which might have multiple Word64's inside)
-keyPathSize :: Int
-keyPathSize = wordsPerKey * pathSize
 
 -- | Note that  (mod n wordSize) and (n .&. modMask) are the same
 modMask :: Word64
@@ -271,24 +291,24 @@ twoLeaf path1 leaf1 path2 k2 v2 = go path1 path2
   where
     leaf2 = Leaf k2 v2
     go p1 p2
-      | Just (i, is) <- VP.uncons p1
-      , Just (j, js) <- VP.uncons p2 =
+      | Just (i, is) <- VP.uncons p1,
+        Just (j, js) <- VP.uncons p2 =
         if i == j
           then One i (go is js)
-          else let two = Two (setBits [i, j])
-                in if i < j
-                     then two leaf1 leaf2
-                     else two leaf2 leaf1
+          else
+            let two = Two (setBits [i, j])
+             in if i < j
+                  then two leaf1 leaf2
+                  else two leaf2 leaf1
       | otherwise =
         error $
-        concat
-          [ "The path ran out of segments in 'twoLeaf'. \npath1: "
-          , show path1
-          , "\npath2: "
-          , show path2
-          ]
+          concat
+            [ "The path ran out of segments in 'twoLeaf'. \npath1: ",
+              show path1,
+              "\npath2: ",
+              show path2
+            ]
 {-# INLINE twoLeaf #-}
-
 
 insertWithKey :: (Key -> v -> v -> v) -> Key -> v -> KeyMap v -> KeyMap v
 insertWithKey f k = insertWithKey' 0 f (keyPath k) k
@@ -429,8 +449,8 @@ foldWithAscKey accum !ans0 (Full arr) = loop ans0 0
     loop !ans i | i >= n = ans
     loop !ans i = loop (foldWithAscKey accum ans (index arr i)) (i + 1)
 
-sizeKeyMap :: KeyMap v -> Int
-sizeKeyMap = foldWithAscKey (\ans _k _v -> ans + 1) 0
+size :: KeyMap v -> Int
+size = foldWithAscKey (\ans _k _v -> ans + 1) 0
 
 -- ================================================================
 -- aggregation in descending order of keys
@@ -454,8 +474,8 @@ foldWithDescKey accum !ans0 (Full arr) = loop ans0 (n - 1)
 -- ==================================================================
 -- Lookup a key
 
-lookupHM :: Key -> KeyMap v -> Maybe v
-lookupHM key = searchPath key (keyPath key)
+lookup :: Key -> KeyMap v -> Maybe v
+lookup key = searchPath key (keyPath key)
 
 searchPath :: Key -> Path -> KeyMap v -> Maybe v
 searchPath key = go
@@ -624,7 +644,7 @@ restrictKeys :: KeyMap v -> Set Key -> KeyMap v
 restrictKeys hm = Set.foldl' accum Empty
   where
     accum ans key =
-      case lookupHM key hm of
+      case lookup key hm of
         Nothing -> ans
         Just v -> insert key v ans
 
@@ -632,7 +652,7 @@ withoutKeys :: KeyMap v -> Set Key -> KeyMap v
 withoutKeys hm s = Set.foldl' accum hm s
   where
     accum ans key =
-      case lookupHM key hm of
+      case lookup key hm of
         Nothing -> ans
         Just _ -> delete key ans
 
@@ -916,24 +936,13 @@ insertAt :: PArray e -> Int -> e -> PArray e
 insertAt arr idx b = runST (insertM arr idx b)
 {-# INLINE insertAt #-}
 
--- | Create a new Array of size 'n' filled with objects 'a'
-arrayOf :: Int -> a -> PArray a
-arrayOf n a = runST $ do
-  marr <- mnew n
-  let loop i
-        | i < n = mwrite marr i a >> loop (i + 1)
-        | otherwise = pure ()
-  loop 0
-  mfreeze marr
-{-# INLINE arrayOf #-}
-
 -- | Extract a slice from an array
 slice :: Int -> Int -> PArray a -> PArray a
 slice 0 hi arr | hi == (isize arr - 1) = arr
-slice lo hi arr = fst (withMutArray size action)
+slice lo hi arr = fst (withMutArray asize action)
   where
-    size = max (hi - lo + 1) 0
-    action marr = mcopy marr 0 arr lo size
+    asize = max (hi - lo + 1) 0
+    action marr = mcopy marr 0 arr lo asize
 {-# INLINE slice #-}
 
 -- ========================================================================
