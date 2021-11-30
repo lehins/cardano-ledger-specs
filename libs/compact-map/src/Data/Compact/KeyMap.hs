@@ -9,8 +9,9 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
 module Data.Compact.KeyMap
-  ( KeyMap,
+  ( KeyMap(..),
     Key (..),
+    empty,
     size,
     lookup,
     lookupMax,
@@ -33,7 +34,19 @@ module Data.Compact.KeyMap
     foldWithDescKey,
     fromList,
     toList,
+    lub,
+    maxViewWithKey,
+    minViewWithKey,
+    foldOverIntersection,
+    -- Pretty printing helpers
+    PrettyA(..),
     ppKeyMap,
+    equate,
+    ppArray,
+    -- Debugging
+    histogram,
+    hdepth,
+    bitsPerSegment,
   )
 where
 
@@ -48,7 +61,6 @@ import Data.Bits
     shiftR,
     testBit,
     unsafeShiftL,
-    zeroBits,
     (.&.),
     (.|.),
   )
@@ -64,6 +76,7 @@ import Data.Compact.SmallArray
     mwrite,
     tolist,
     withMutArray,
+    withMutArray_,
   )
 import Data.Foldable (foldl')
 import Data.Primitive.SmallArray ()
@@ -72,6 +85,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text, pack)
 import qualified Data.Vector.Primitive as VP
+import qualified Data.Vector.Primitive.Mutable as MVP
 import Data.Word (Word64)
 import GHC.Exts (isTrue#, reallyUnsafePtrEquality#, (==#))
 import Prettyprinter
@@ -187,6 +201,9 @@ data KeyMap v
   | Full {-# UNPACK #-} !(Small.SmallArray (KeyMap v)) -- wordSize subtrees
   deriving (NFData, Generic)
 
+empty :: KeyMap v
+empty = Empty
+
 notEmpty :: KeyMap v -> Bool
 notEmpty Empty = False
 notEmpty _ = True
@@ -197,9 +214,6 @@ isEmpty _ = False
 
 instance Eq v => Eq (KeyMap v) where
   (==) x y = toList x == toList y
-
-heapAdd :: HeapWords a => a -> Int -> Int
-heapAdd x ans = heapWords x + ans
 
 heapPlus :: HeapWords a => Int -> a -> Int
 heapPlus ans x = heapWords x + ans
@@ -214,14 +228,6 @@ instance HeapWords v => HeapWords (KeyMap v) where
 
 instance HeapWords () where
   heapWords () = 1
-
-tag :: KeyMap v -> String
-tag Empty = "Empty"
-tag (One _ _xs) = "One"
-tag (Leaf _ _v) = "Leaf"
-tag (BitmapIndexed _ _arr) = "BitmapedIndexed"
-tag (Full _arr) = "Full"
-tag (Two _ _a _b) = "Two"
 
 -- ======================================================================
 -- Insertion
@@ -530,11 +536,11 @@ instance Functor KeyMap where
 
 -- | Make an array of size 1, with 'x' stored at index 0.
 array1 :: a -> PArray a
-array1 x = fst (withMutArray 1 (\marr -> mwrite marr 0 x))
+array1 x = withMutArray_ 1 (\marr -> mwrite marr 0 x)
 
 -- | Make an array of size 2, with 'x' stored at index 0.
 array2 :: a -> a -> PArray a
-array2 x y = fst (withMutArray 2 (\marr -> mwrite marr 0 x >> mwrite marr 1 y))
+array2 x y = withMutArray_ 2 (\marr -> mwrite marr 0 x >> mwrite marr 1 y)
 
 union4 :: Int -> (Key -> v -> v -> v) -> KeyMap v -> KeyMap v -> KeyMap v
 union4 _n _combine Empty Empty = Empty
@@ -790,10 +796,6 @@ maxChildren :: Int
 maxChildren = 1 `unsafeShiftL` bitsPerSegment
 {-# INLINE maxChildren #-}
 
-subkeyMask :: Bitmap
-subkeyMask = 1 `unsafeShiftL` bitsPerSegment - 1
-{-# INLINE subkeyMask #-}
-
 sparseIndex :: Bitmap -> Bitmap -> Int
 sparseIndex b m = popCount (b .&. (m - 1))
 {-# INLINE sparseIndex #-}
@@ -839,9 +841,6 @@ fullNodeMask = complement (complement 0 `unsafeShiftL` maxChildren)
 
 setBits :: [Int] -> Bitmap
 setBits = foldl' setBit 0
-
-oneBits :: Bitmap
-oneBits = complement (zeroBits :: Word64)
 
 -- | Get the 'ith' element from a Bitmap
 ith :: Bitmap -> Int -> Int
@@ -894,7 +893,7 @@ remove :: PArray a -> Int -> PArray a
 remove arr i =
   if i < 0 || i > n
     then error $ boundsMessage "remove" i (isize arr - 1)
-    else fst (withMutArray n action)
+    else withMutArray_ n action
   where
     n = isize arr - 1
     action marr = do
@@ -906,7 +905,7 @@ remove arr i =
 update :: PArray t -> Int -> t -> PArray t
 update arr i _
   | i < 0 || i >= isize arr = error $ boundsMessage "update" i (isize arr - 1)
-update arr i t = fst (withMutArray size1 action)
+update arr i t = withMutArray_ size1 action
   where
     size1 = isize arr
     action marr = do
@@ -939,7 +938,7 @@ insertAt arr idx b = runST (insertM arr idx b)
 -- | Extract a slice from an array
 slice :: Int -> Int -> PArray a -> PArray a
 slice 0 hi arr | hi == (isize arr - 1) = arr
-slice lo hi arr = fst (withMutArray asize action)
+slice lo hi arr = withMutArray_ asize action
   where
     asize = max (hi - lo + 1) 0
     action marr = mcopy marr 0 arr lo asize
@@ -958,7 +957,7 @@ slice lo hi arr = fst (withMutArray asize action)
 --   as in the original 'arr'. if 'n' is too large or too small (negative) for the array, 'n' is
 --   adjusted to copy everything (too large) or nothing (too small).
 lowSlice :: Int -> PArray a -> a -> PArray a
-lowSlice slicepoint arr x = fst (withMutArray (m + 1) action)
+lowSlice slicepoint arr x = withMutArray_ (m + 1) action
   where
     m = min (max slicepoint 0) (isize arr) -- if slicepoint<0 then copy zero things, if slicepoint>(isize arr) then copy everything
     action marr =
@@ -971,7 +970,7 @@ lowSlice slicepoint arr x = fst (withMutArray (m + 1) action)
 -- 'slicepoint' is too large or too small (negative) for the array, 'slicepoint' is
 -- adjusted to copy slicepointothing (too large) or everything (too small).
 highSlice :: Int -> PArray a -> a -> PArray a
-highSlice slicepoint arr x = fst (withMutArray (isize arr - m + 1) action)
+highSlice slicepoint arr x = withMutArray_ (isize arr - m + 1) action
   where
     -- if slicepoint < 0 then copy zero things, if slicepoint > (isize arr) then copy everything
     m = min (max (slicepoint + 1) 0) (isize arr)
@@ -980,7 +979,7 @@ highSlice slicepoint arr x = fst (withMutArray (isize arr - m + 1) action)
       mcopy marr 1 arr m (isize arr - m)
 
 arrayFromBitmap :: Bitmap -> (Int -> a) -> PArray a
-arrayFromBitmap bm f = fst (withMutArray (popCount bm) (loop 0))
+arrayFromBitmap bm f = withMutArray_ (popCount bm) (loop 0)
   where
     loop n _marr | n >= 64 = pure ()
     loop n marr =
@@ -992,7 +991,7 @@ arrayFromBitmap bm f = fst (withMutArray (popCount bm) (loop 0))
 -- ======================================================================================
 -- Helper functions for Pretty Printers
 
-newtype PrettyAnn = Width Int
+data PrettyAnn
 
 type Ann = [PrettyAnn]
 
@@ -1092,3 +1091,31 @@ ppKeyMap k p (Full arr) = ppSexp "F" [ppList q (zip (bitmapToList fullNodeMask) 
 instance PrettyA v => Show (KeyMap v) where
   show x = show (ppKeyMap ppKey prettyA x)
   showList xs x = unlines (map (\y -> "\n" ++ show (ppKeyMap ppKey prettyA y)) xs) ++ x
+
+-- Debugging tools:
+
+hdepth :: KeyMap v -> Int
+hdepth Empty = 0
+hdepth (One _ x) = 1 + hdepth x
+hdepth (Leaf _ _) = 1
+hdepth (BitmapIndexed _ arr) = 1 + foldr (max . hdepth) 0 arr
+hdepth (Full arr) = 1 + foldr (max . hdepth) 0 arr
+hdepth (Two _ x y) = 1 + max (hdepth x) (hdepth y)
+
+histogram :: KeyMap v -> VP.Vector Int
+histogram km = VP.create $ do
+  mvec <- MVP.new (fromIntegral wordSize)
+  mvec <$ histogramMut mvec km
+
+histogramMut :: VP.MVector s Int -> KeyMap v -> ST s ()
+histogramMut mvec = go
+  where
+    increment = MVP.modify mvec (+ 1)
+    go =
+      \case
+        Empty -> pure ()
+        One _ x -> increment 1 >> go x
+        Leaf _ _ -> pure ()
+        BitmapIndexed _ arr -> increment (isize arr - 1) >> mapM_ go arr
+        Full arr -> increment (fromIntegral wordSize - 1) >> mapM_ go arr
+        Two _ x y -> increment 2 >> go x >> go y

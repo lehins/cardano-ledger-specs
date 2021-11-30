@@ -5,18 +5,9 @@
 
 module Test.Compact.KeyMap where
 
-import Cardano.Prelude (HeapWords (..), ST, (<|>))
+import Cardano.Prelude (HeapWords (..), (<|>))
 import qualified Data.Compact.HashMap as HM
 import Data.Compact.KeyMap as KeyMap
-import Data.Compact.SmallArray
-  ( MArray,
-    PArray,
-    isize,
-    mindex,
-    mwrite,
-    tolist,
-    withMutArray,
-  )
 import Data.Foldable (foldl')
 import qualified Data.List as List
 import qualified Data.Map.Strict as Map
@@ -90,7 +81,7 @@ foldlkey toL foldlF hm = foldlF accum1 100 hm === List.foldl' accum2 100 (toL hm
     accum2 ans (_key, v) = ans + v
 
 sizeProp :: forall k v m. (m k v -> [(k, v)]) -> (m k v -> Int) -> m k v -> Property
-sizeProp toL size hm = size hm === length (toL hm)
+sizeProp toL sz hm = sz hm === length (toL hm)
 
 setprop ::
   forall k v m.
@@ -300,7 +291,7 @@ instance (Ord n, Num n) => Monoid (Stat n) where
 
 instance (Integral n, Show n) => Show (Stat n) where
   show (Stat c s mx mn) =
-    "{count= " ++ show c ++ ", sum=" ++ show s ++ ", max=" ++ show mx
+    "{count=" ++ show c ++ ", sum=" ++ show s ++ ", max=" ++ show mx
       ++ ", min="
       ++ show mn
       ++ (if c == 0 then "}" else ", avg=" ++ show (div s c) ++ "}")
@@ -322,67 +313,42 @@ count x = go 0 (0, 0, 0, mempty, mempty, 0) x
       foldl' (go (length arr + d)) (e, o, t, l, add (length arr) b, f) arr
     go d !(e, o, t, l, b, f) (Full arr) = foldl' (go (length arr + d)) (e, o, t, l, b, f + 1) arr
 
-hdepth :: KeyMap v -> Int
-hdepth Empty = 0
-hdepth (One _ x) = 1 + hdepth x
-hdepth (Leaf _ _) = 1
-hdepth (BitmapIndexed _ arr) = 1 + maximum (foldr (\x ans -> hdepth x : ans) [] arr)
-hdepth (Full arr) = 1 + maximum (foldr (\x ans -> hdepth x : ans) [] arr)
-hdepth (Two _ x y) = 1 + max (hdepth x) (hdepth y)
-
-increment :: Num a => MArray s a -> Int -> ST s ()
-increment marr i = do n <- mindex marr i; mwrite marr i (n + 1)
-
-histogram :: KeyMap v -> MArray s Int -> ST s ()
-histogram Empty _ = pure ()
-histogram (One _ x) marr = increment marr 1 >> histogram x marr
-histogram (Leaf _ _) _ = pure ()
-histogram (BitmapIndexed _ arr) marr = increment marr (isize arr - 1) >> mapM_ (\x -> histogram x marr) arr
-histogram (Full arr) marr = increment marr (intSize - 1) >> mapM_ (\x -> histogram x marr) arr
-histogram (Two _ x y) marr = increment marr 2 >> histogram x marr >> histogram y marr
-
-histo :: KeyMap v -> PArray Int
-histo x = fst (withMutArray intSize process)
-  where
-    process marr = do initialize (intSize - 1); histogram x marr
-      where
-        initialize n | n < 0 = pure ()
-        initialize n = mwrite marr n 0 >> initialize (n - 1)
-
 -- KeyMap is designed for values of type Key which are true cryptographic hashes. This means they
 -- are close to uniformly distributed in their 32 byte range. One way to test this is to compare the
 -- actual depth of the tree with the log of its size. With Non uniform distrubution the depth of
 -- the tree can be many times the log of its size (up to 'bitsPerSegment' times larger). It they are
 -- even close to uniformly distributed it is highly likely (amost certain) that depth < log size.
 keysAreUniform :: Int -> Int -> String -> String
-keysAreUniform depth size stats = if ok then stats else error message
+keysAreUniform depth sz stats = if ok then stats else error message
   where
-    ok = depth < ceiling (log ((fromIntegral size) :: Double))
-    message = "Keys are not uniformly distributed error: 'depth' is not less than '(log size)'\n" ++ stats
+    ok = depth < ceiling (log (fromIntegral sz :: Double))
+    message =
+      "Keys are not uniformly distributed error: 'depth' is not less than '(log size)'\n" ++ stats
 
 statisticString :: HeapWords a => KeyMap a -> String
 statisticString keymap =
-  keysAreUniform depth size $
+  keysAreUniform depth sz $
     unlines
-      [ "Statistics for KeyMap of size " ++ show size,
+      [ "Statistics for KeyMap of size " ++ show sz,
         "bits per level = " ++ show bitsPerSegment,
-        "max number of levels = " ++ show keyPathSize,
         "actual depth = " ++ show depth,
-        "empty = " ++ show empty,
+        "empty = " ++ show empty',
         "leaf  = " ++ show leaf,
         "one   = " ++ show one,
         "two   = " ++ show two,
         "bits  = " ++ show bit,
         "full  = " ++ show full,
         "hwords = " ++ show hwords,
-        "branching factor histogram (they range from [0.." ++ show ((2 :: Int) ^ bitsPerSegment) ++ "]) =\n  " ++ show (tolist hist)
+        "branching factor histogram (they range from [0.."
+          ++ show ((2 :: Int) ^ bitsPerSegment)
+          ++ "]) =\n  "
+          ++ show (histogram keymap)
       ]
   where
-    (empty, one, two, leaf, bit, full) = count keymap
-    hist = histo keymap
+    (empty', one, two, leaf, bit, full) = count keymap
     hwords = heapWords keymap
     depth = hdepth keymap
-    size = sizeKeyMap keymap
+    sz = size keymap
 
 testStatistics :: Int -> IO String
 testStatistics n = pure $ statisticString keymap

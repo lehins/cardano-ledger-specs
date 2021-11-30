@@ -32,6 +32,7 @@ tolist = Fold.toList
 mindex :: MArray s a -> Int -> ST s a
 msize :: MArray s a -> Int
 mnew :: Int -> ST s (MArray s a)
+mnewInit :: Int -> a -> ST s (MArray s a)
 mfreeze :: MArray s a -> ST s (PArray a) -- This should be the unsafe version that does not copy
 mwrite :: MArray s a -> Int -> a -> ST s ()
 mcopy :: forall s. (forall a. MArray s a -> Int -> PArray a -> Int -> Int -> ST s ())
@@ -40,6 +41,8 @@ mindex = mboundsCheck Small.readSmallArray
 msize = Small.sizeofSmallMutableArray
 
 mnew size = Small.newSmallArray size (error "uninitialized index, allocated by 'mnew', is referenced")
+
+mnewInit size = Small.newSmallArray size
 
 mfreeze = Small.unsafeFreezeSmallArray
 
@@ -65,6 +68,8 @@ withMutArray n process = runST $ do
   arr <- mfreeze marr
   pure (arr, x)
 
+withMutArray_ :: Int -> (forall s. MArray s a -> ST s x) -> PArray a
+withMutArray_ n process = fst $ withMutArray n process
 
 boundsMessage :: String -> Int -> Int -> String
 boundsMessage funcName i n =
