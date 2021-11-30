@@ -2,6 +2,7 @@
 {-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MagicHash #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE UnboxedTuples #-}
@@ -43,6 +44,7 @@ import qualified Data.Primitive.SmallArray as Small
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Text (Text, pack)
+import qualified Data.Vector.Primitive as VP
 import Data.Word (Word64)
 import GHC.Exts (isTrue#, reallyUnsafePtrEquality#, (==#))
 import Prettyprinter
@@ -88,7 +90,7 @@ bitmapInvariantMessage funcName b =
 type Segment = Int
 
 -- | Represents a list of 'Segment', which when combined is in 1-1 correspondance with a Key
-type Path = [Segment]
+type Path = VP.Vector Segment
 
 -- | The maximum value of a Segment, as an Int
 intSize :: Int
@@ -102,10 +104,8 @@ wordSize = 2 ^ (fromIntegral bitsPerSegment :: Word64)
 
 -- | The length of a list of segments representing a key. Need to be
 --   carefull if a Key isn't evenly divisible by bitsPerSegment
-pathSize :: Word64
-pathSize = if mod 64 wbits == 0 then div 64 wbits else div 64 wbits + 1
-  where
-    wbits = fromIntegral bitsPerSegment :: Word64
+pathSize :: Int
+pathSize = quot 64 bitsPerSegment + if rem 64 bitsPerSegment == 0 then 0 else 1
 
 -- ========================================================================
 -- Keys
@@ -133,7 +133,7 @@ wordsPerKey = 4
 
 -- | The length of a Path for a Key (which might have multiple Word64's inside)
 keyPathSize :: Int
-keyPathSize = wordsPerKey * fromIntegral pathSize
+keyPathSize = wordsPerKey * pathSize
 
 -- | Note that  (mod n wordSize) and (n .&. modMask) are the same
 modMask :: Word64
@@ -144,15 +144,16 @@ modMask = wordSize - 1
 --   loop cnt n ans = loop (cnt - 1) (div n wordSize) ((fromIntegral (mod n wordSize)):ans)
 --   But much faster.
 getpath :: Word64 -> Path
-getpath w64 = loop pathSize w64 []
+getpath = VP.reverse . VP.unfoldrExactN pathSize mkPath
   where
-    loop :: Word64 -> Word64 -> [Int] -> [Int]
-    loop 0 _ ans = ans
-    loop cnt n ans = loop (cnt - 1) (shiftR n bitsPerSegment) (fromIntegral (n .&. modMask) : ans)
+    mkPath :: Word64 -> (Segment, Word64)
+    mkPath n = (fromIntegral (n .&. modMask), shiftR n bitsPerSegment)
+{-# INLINE getpath #-}
 
 -- | Break up a Key into a Path
 keyPath :: Key -> Path
-keyPath (Key w0 w1 w2 w3) = getpath w0 ++ getpath w1 ++ getpath w2 ++ getpath w3
+keyPath (Key w0 w1 w2 w3) = getpath w0 <> getpath w1 <> getpath w2 <> getpath w3
+{-# INLINE keyPath #-}
 
 showBM :: Bitmap -> String
 showBM bm = show (bitmapToList bm)
@@ -234,13 +235,13 @@ insertWithKey' !n0 combine !path !k !x = go n0
         LT -> Two (setBits [i, j]) node (go (n + 1) Empty)
         GT -> Two (setBits [i, j]) (go (n + 1) Empty) node
       where
-        i = path !! n
+        i = path VP.! n
     go !n t@(Leaf k2 y)
       | k == k2 =
         if x `ptrEq` y
           then t
           else Leaf k (combine k x y)
-      | otherwise = twoLeaf (drop n (keyPath k2)) t (drop n path) k x
+      | otherwise = twoLeaf (VP.drop n (keyPath k2)) t (VP.drop n path) k x
     go !n t@(BitmapIndexed bmap arr)
       | not (testBit bmap j) =
         let !arr' = insertAt arr i $! Leaf k x
@@ -253,7 +254,7 @@ insertWithKey' !n0 combine !path !k !x = go n0
               else BitmapIndexed bmap (update arr i st')
       where
         i = indexFromSegment bmap j
-        j = path !! n
+        j = path VP.! n
     go !n t@(Two bmap x0 x1)
       | not (testBit bmap j) =
         let !arr' = insertAt (fromlist [x0, x1]) i $! Leaf k x
@@ -269,7 +270,7 @@ insertWithKey' !n0 combine !path !k !x = go n0
                   else Two bmap x0 st'
       where
         i = indexFromSegment bmap j
-        j = path !! n
+        j = path VP.! n
     go !n t@(Full arr) =
       let !st = index arr i
           !st' = go (n + 1) st
@@ -278,24 +279,40 @@ insertWithKey' !n0 combine !path !k !x = go n0
             else Full (update arr i st')
       where
         i = indexFromSegment fullNodeMask j
-        j = path !! n
+        j = path VP.! n
 {-# INLINE insertWithKey' #-}
 
 twoLeaf :: Path -> KeyMap v -> Path -> Key -> v -> KeyMap v
-twoLeaf [] _ _ _ _ = error "the path ran out of segments in twoLeaf case 1."
-twoLeaf _ _ [] _ _ = error "the path ran out of segments in twoLeaf case 1."
-twoLeaf (i : is) leaf1 (j : js) k2 v2
-  | i == j = One i (twoLeaf is leaf1 js k2 v2)
-  | otherwise =
-    if i < j
-      then Two (setBits [i, j]) leaf1 (Leaf k2 v2)
-      else Two (setBits [i, j]) (Leaf k2 v2) leaf1
+twoLeaf path1 leaf1 path2 k2 v2 = go path1 path2
+  where
+    leaf2 = Leaf k2 v2
+    go p1 p2
+      | Just (i, is) <- VP.uncons p1
+      , Just (j, js) <- VP.uncons p2 =
+        if i == j
+          then One i (go is js)
+          else let two = Two (setBits [i, j])
+                in if i < j
+                     then two leaf1 leaf2
+                     else two leaf2 leaf1
+      | otherwise =
+        error $
+        concat
+          [ "The path ran out of segments in 'twoLeaf'. \npath1: "
+          , show path1
+          , "\npath2: "
+          , show path2
+          ]
+{-# INLINE twoLeaf #-}
+
 
 insertWithKey :: (Key -> v -> v -> v) -> Key -> v -> KeyMap v -> KeyMap v
 insertWithKey f k = insertWithKey' 0 f (keyPath k) k
+{-# INLINE insertWithKey #-}
 
 insertWith :: (t -> t -> t) -> Key -> t -> KeyMap t -> KeyMap t
 insertWith f k = insertWithKey' 0 (\_ key val -> f key val) (keyPath k) k
+{-# INLINE insertWith #-}
 
 insert :: Key -> v -> KeyMap v -> KeyMap v
 insert !k = insertWithKey' 0 (\_key new _old -> new) (keyPath k) k
@@ -320,9 +337,9 @@ delete2 path key km continue = case3 (continue Empty) leafF arrayF km
   where
     leafF k2 _ = if key == k2 then continue Empty else continue km
     arrayF bmap arr =
-      case path of
-        [] -> continue km
-        (i : is) ->
+      case VP.uncons path of
+        Nothing -> continue km
+        Just (i, is) ->
           let m = setBit 0 i
               j = sparseIndex bmap m
               newcontinue Empty = continue (buildKeyMap (clearBit bmap i) (remove arr j))
@@ -454,52 +471,63 @@ foldWithDescKey accum !ans0 (Full arr) = loop ans0 (n - 1)
 -- Lookup a key
 
 lookupHM :: Key -> KeyMap v -> Maybe v
-lookupHM key = go (keyPath key)
-  where
-    go _ Empty = Nothing
-    go _ (Leaf key2 v) = if key == key2 then Just v else Nothing
-    go [] _ = Nothing -- Path is empty, we will never find it.
-    go (j : js) (One i x) = if i == j then go js x else Nothing
-    go (j : js) (Two bm x0 x1) =
-      if testBit bm j
-        then (if i == 0 then go js x0 else go js x1)
-        else Nothing
-      where
-        i = indexFromSegment bm j
-    go (j : js) (BitmapIndexed bm arr) =
-      if testBit bm j
-        then go js (index arr i)
-        else Nothing
-      where
-        i = indexFromSegment bm j
-    go (j : js) (Full arr) =
-      -- Every possible bit is set, so no testBit call necessary
-      go js (index arr i)
-      where
-        i = indexFromSegment fullNodeMask j
+lookupHM key = searchPath key (keyPath key)
 
 searchPath :: Key -> Path -> KeyMap v -> Maybe v
-searchPath _key _path Empty = Nothing
-searchPath key _path (Leaf key2 v) = if key == key2 then Just v else Nothing
-searchPath _key [] _ = Nothing -- Path is empty, we will never find it.
-searchPath key (j : js) (One i x) = if i == j then searchPath key js x else Nothing
-searchPath key (j : js) (Two bm x0 x1) =
-  if testBit bm j
-    then (if i == 0 then searchPath key js x0 else searchPath key js x1)
-    else Nothing
+searchPath key = go
   where
-    i = indexFromSegment bm j
-searchPath key (j : js) (BitmapIndexed bm arr) =
-  if testBit bm j
-    then searchPath key js (index arr i)
-    else Nothing
-  where
-    i = indexFromSegment bm j
-searchPath key (j : js) (Full arr) =
-  -- Every possible bit is set, so no testBit call necessary
-  searchPath key js (index arr i)
-  where
-    i = indexFromSegment fullNodeMask j
+    go path =
+      \case
+        Leaf key2 v ->
+          if key == key2
+            then Just v
+            else Nothing
+        One i x
+          | Just (j, js) <- VP.uncons path ->
+            if i == j
+              then go js x
+              else Nothing
+        Two bm x0 x1
+          | Just (j, js) <- VP.uncons path ->
+            if testBit bm j
+              then
+                if indexFromSegment bm j == 0
+                  then go js x0
+                  else go js x1
+              else Nothing
+        BitmapIndexed bm arr
+          | Just (j, js) <- VP.uncons path ->
+            if testBit bm j
+              then go js (index arr (indexFromSegment bm j))
+              else Nothing
+        Full arr
+          | Just (j, js) <- VP.uncons path ->
+            -- Every possible bit is set, so no testBit call necessary
+            go js (index arr (indexFromSegment fullNodeMask j))
+        _ -> Nothing -- Path is empty, we will never find it.
+{-# INLINE searchPath #-}
+
+-- searchPath _key _path Empty = Nothing
+-- searchPath key _path (Leaf key2 v) = if key == key2 then Just v else Nothing
+-- searchPath _key [] _ = Nothing -- Path is empty, we will never find it.
+-- searchPath key (j : js) (One i x) = if i == j then searchPath key js x else Nothing
+-- searchPath key (j : js) (Two bm x0 x1) =
+--   if testBit bm j
+--     then (if i == 0 then searchPath key js x0 else searchPath key js x1)
+--     else Nothing
+--   where
+--     i = indexFromSegment bm j
+-- searchPath key (j : js) (BitmapIndexed bm arr) =
+--   if testBit bm j
+--     then searchPath key js (index arr i)
+--     else Nothing
+--   where
+--     i = indexFromSegment bm j
+-- searchPath key (j : js) (Full arr) =
+--   -- Every possible bit is set, so no testBit call necessary
+--   searchPath key js (index arr i)
+--   where
+--     i = indexFromSegment fullNodeMask j
 
 -- =========================================================
 -- map
@@ -572,13 +600,13 @@ intersect3 :: Int -> (Key -> u -> v -> w) -> KeyMap u -> KeyMap v -> KeyMap w
 intersect3 _ _ Empty Empty = Empty
 intersect3 n combine x y = case3 Empty leafF1 arrayF1 x
   where
-    leafF1 k v = case searchPath k (drop n (keyPath k)) y of
+    leafF1 k v = case searchPath k (VP.drop n (keyPath k)) y of
       Nothing -> Empty
       Just u -> Leaf k (combine k v u)
     arrayF1 bm1 arr1 = case3 Empty leafF2 arrayF2 y
       where
         leafF2 k v =
-          case searchPath k (drop n (keyPath k)) x of
+          case searchPath k (VP.drop n (keyPath k)) x of
             Nothing -> Empty
             Just u -> Leaf k (combine k u v)
         arrayF2 bm2 arr2 = dropEmpty bm (arrayFromBitmap bm actionAt)
@@ -603,12 +631,12 @@ intersectionWithKey = intersect3 0
 foldIntersect2 :: Int -> (ans -> Key -> u -> v -> ans) -> ans -> KeyMap u -> KeyMap v -> ans
 foldIntersect2 n accum ans x y = case3 ans leafF1 arrayF1 x
   where
-    leafF1 k u = case searchPath k (drop n (keyPath k)) y of
+    leafF1 k u = case searchPath k (VP.drop n (keyPath k)) y of
       Nothing -> ans
       Just v -> accum ans k u v
     arrayF1 bm1 arr1 = case3 ans leafF2 arrayF2 y
       where
-        leafF2 k v = case searchPath k (drop n (keyPath k)) x of
+        leafF2 k v = case searchPath k (VP.drop n (keyPath k)) x of
           Nothing -> ans
           Just u -> accum ans k u v
         arrayF2 bm2 arr2 = foldl' accum2 ans (bitmapToList bm)
@@ -724,9 +752,9 @@ splitHelp2 path key x smallC largeC = case3 emptyC leafF arrayF x
       EQ -> (smallC Empty, Just u, largeC Empty)
       LT -> (smallC (Leaf k u), Nothing, largeC Empty)
       GT -> (smallC Empty, Nothing, largeC (Leaf k u))
-    arrayF bm arr = case path of
-      [] -> (smallC Empty, Nothing, largeC Empty)
-      (i : is) ->
+    arrayF bm arr = case VP.uncons path of
+      Nothing -> (smallC Empty, Nothing, largeC Empty)
+      Just (i, is) ->
         let (bmsmall, found, bmlarge) = splitBitmap bm i
             splicepoint = indexFromSegment bm i
          in if found

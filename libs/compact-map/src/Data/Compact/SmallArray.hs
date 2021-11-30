@@ -46,7 +46,7 @@ mfreeze = Small.unsafeFreezeSmallArray
 mwrite arr i a =
   if i >= 0 && i < msize arr
     then Small.writeSmallArray arr i a
-    else error ("mwrite error, " ++ show i ++ ", not in bounds (0.." ++ show (msize arr - 1) ++ ").")
+    else error $ boundsMessage "mwrite" i (msize arr - 1)
 
 mcopy = Small.copySmallArray
 

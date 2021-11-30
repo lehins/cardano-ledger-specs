@@ -110,6 +110,7 @@ size (HashMap m) = KM.sizeKeyMap m
 
 fromList :: Keyed k => [(k, v)] -> HashMap k v
 fromList xs = HashMap (KM.fromList (map (first toKey) xs))
+{-# INLINE fromList #-}
 
 toList :: HashMap k v -> [(k, v)]
 toList (HashMap m) = KM.foldWithDescKey (\k v ans -> (fromKey k, v) : ans) [] m
