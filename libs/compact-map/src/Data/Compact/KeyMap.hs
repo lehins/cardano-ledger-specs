@@ -51,18 +51,6 @@ import Prettyprinter
 import qualified Prettyprinter.Internal as Pretty
 import System.Random.Stateful (Uniform (..))
 
--- =============================
-
--- | binary encoding of 'n', LEAST significant bit on the front of the list.
-binary :: Integral n => n -> [n]
-binary 0 = []
-binary 1 = [1]
-binary n = mod n 2 : binary (div n 2)
-
--- | Show 'n' as a binary number with MOST significant bits on the front of the list.
-bin :: Integral n => n -> [n]
-bin x = reverse (binary x)
-
 -- ==========================================================================
 -- bitsPerSegment, Segments, Paths. Breaking a Key into a sequence of small components
 
@@ -92,14 +80,9 @@ type Segment = Int
 -- | Represents a list of 'Segment', which when combined is in 1-1 correspondance with a Key
 type Path = VP.Vector Segment
 
--- | The maximum value of a Segment, as an Int
-intSize :: Int
-intSize = 2 ^ bitsPerSegment
-{-# INLINE intSize #-}
-
 -- | The maximum value of a segment, as a Word64
 wordSize :: Word64
-wordSize = 2 ^ (fromIntegral bitsPerSegment :: Word64)
+wordSize = 2 ^ bitsPerSegment
 {-# INLINE wordSize #-}
 
 -- | The length of a list of segments representing a key. Need to be
@@ -143,16 +126,17 @@ modMask = wordSize - 1
 --   loop 0 _ ans = ans
 --   loop cnt n ans = loop (cnt - 1) (div n wordSize) ((fromIntegral (mod n wordSize)):ans)
 --   But much faster.
-getpath :: Word64 -> Path
-getpath = VP.reverse . VP.unfoldrExactN pathSize mkPath
+getPath :: Word64 -> Path
+getPath = VP.reverse . VP.unfoldrExactN pathSize mkPath
   where
     mkPath :: Word64 -> (Segment, Word64)
     mkPath n = (fromIntegral (n .&. modMask), shiftR n bitsPerSegment)
-{-# INLINE getpath #-}
+    {-# INLINE mkPath #-}
+{-# INLINE getPath #-}
 
 -- | Break up a Key into a Path
 keyPath :: Key -> Path
-keyPath (Key w0 w1 w2 w3) = getpath w0 <> getpath w1 <> getpath w2 <> getpath w3
+keyPath (Key w0 w1 w2 w3) = getPath w0 <> getPath w1 <> getPath w2 <> getPath w3
 {-# INLINE keyPath #-}
 
 showBM :: Bitmap -> String
@@ -178,9 +162,9 @@ data KeyMap v
   | One {-# UNPACK #-} !Int !(KeyMap v) -- 1 subtree
   | Two {-# UNPACK #-} !Bitmap !(KeyMap v) !(KeyMap v) -- 2 subtrees
   | BitmapIndexed
-      {-# UNPACK #-} !Bitmap -- 3 - (intSize - 1) subtrees
+      {-# UNPACK #-} !Bitmap -- 3 - (wordSize - 1) subtrees
       {-# UNPACK #-} !(Small.SmallArray (KeyMap v))
-  | Full {-# UNPACK #-} !(Small.SmallArray (KeyMap v)) -- intSize subtrees
+  | Full {-# UNPACK #-} !(Small.SmallArray (KeyMap v)) -- wordSize subtrees
   deriving (NFData, Generic)
 
 notEmpty :: KeyMap v -> Bool
@@ -507,28 +491,6 @@ searchPath key = go
         _ -> Nothing -- Path is empty, we will never find it.
 {-# INLINE searchPath #-}
 
--- searchPath _key _path Empty = Nothing
--- searchPath key _path (Leaf key2 v) = if key == key2 then Just v else Nothing
--- searchPath _key [] _ = Nothing -- Path is empty, we will never find it.
--- searchPath key (j : js) (One i x) = if i == j then searchPath key js x else Nothing
--- searchPath key (j : js) (Two bm x0 x1) =
---   if testBit bm j
---     then (if i == 0 then searchPath key js x0 else searchPath key js x1)
---     else Nothing
---   where
---     i = indexFromSegment bm j
--- searchPath key (j : js) (BitmapIndexed bm arr) =
---   if testBit bm j
---     then searchPath key js (index arr i)
---     else Nothing
---   where
---     i = indexFromSegment bm j
--- searchPath key (j : js) (Full arr) =
---   -- Every possible bit is set, so no testBit call necessary
---   searchPath key js (index arr i)
---   where
---     i = indexFromSegment fullNodeMask j
-
 -- =========================================================
 -- map
 
@@ -798,7 +760,7 @@ lub key hm =
 -- ==========================================
 -- Operations on Bits and Bitmaps
 
--- | Check if two the two arguments are the same value.  N.B. This
+-- | Check if the two arguments are the same value.  N.B. This
 -- function might give false negatives (due to GC moving objects.)
 ptrEq :: a -> a -> Bool
 ptrEq x y = isTrue# (reallyUnsafePtrEquality# x y ==# 1#)
@@ -899,12 +861,9 @@ at position i=4
 
 lessMasks, greaterMasks :: PArray Bitmap
 lessMasks = fromlist [setBits [0 .. i - 1] | i <- [0 .. 63]]
+{-# NOINLINE lessMasks #-}
 greaterMasks = fromlist [setBits [i + 1 .. 63] | i <- [0 .. 63]]
-
-testsplitBitmap :: Int -> ([Int], Bool, [Int])
-testsplitBitmap i = (bitmapToList l, b, bitmapToList g)
-  where
-    (l, b, g) = splitBitmap (complement (zeroBits :: Word64)) i
+{-# NOINLINE greaterMasks #-}
 
 -- =======================================================================
 -- Operations to make new arrays out off old ones with small changes
