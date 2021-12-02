@@ -42,7 +42,7 @@ library
                      , deepseq
                      , prettyprinter
                      , primitive
-                     , random
+                    -- , random
                      , text
                      , nothunks
                      , vector

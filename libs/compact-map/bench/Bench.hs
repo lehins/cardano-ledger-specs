@@ -1,5 +1,5 @@
 {-# LANGUAGE BangPatterns #-}
-
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 module Main where
 
 import Control.Monad
@@ -98,3 +98,11 @@ intersectionBench name xs1 xs2 =
       -- env (pure (VMap.fromList xs1 :: VMap VB VP Key Int, VMap.fromList xs2)) $
       --   bench "VMap" . nf (uncurry VMap.intersection)
     ]
+
+instance Uniform Key where
+  uniformM g = do
+    w0 <- uniformM g
+    w1 <- uniformM g
+    w2 <- uniformM g
+    w3 <- uniformM g
+    pure (Key w0 w1 w2 w3)
