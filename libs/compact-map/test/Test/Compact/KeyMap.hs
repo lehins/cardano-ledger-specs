@@ -15,6 +15,7 @@ import Data.Set (Set)
 import System.Random (mkStdGen)
 import System.Random.Stateful (runStateGen_, uniformListM)
 import Test.QuickCheck
+import Test.QuickCheck.Property (mapTotalResult, maybeNumTests)
 import Test.Tasty
 import Test.Tasty.HUnit (testCaseInfo)
 import Test.Tasty.QuickCheck
@@ -162,8 +163,12 @@ splitwhole k m =
 
 -- =========================================================
 
+withMaxTimesSuccess :: Testable prop => Int -> prop -> Property
+withMaxTimesSuccess !n =
+  mapTotalResult $ \res -> res {maybeNumTests = (n *) <$> (maybeNumTests res <|> Just 100)}
+
 testPropertyN :: Testable prop => Int -> TestName -> prop -> TestTree
-testPropertyN n name x = testProperty name (withMaxSuccess n x)
+testPropertyN n name = testProperty name . withMaxTimesSuccess n
 
 keyMapTests :: TestTree
 keyMapTests =
@@ -171,23 +176,25 @@ keyMapTests =
     "KeyMap has Map properties"
     [ testProperty "to/fromList" prop_RountripToFromList,
       testProperty "HashMap-to-from-list" $ roundtripFromList @Key @Int HM.toList HM.fromList,
-      testPropertyN 500 "HashMap-insert-delete" $ insertDelete @Key @Int HM.insert HM.delete,
+      testPropertyN 5 "HashMap-insert-delete" $ insertDelete @Key @Int HM.insert HM.delete,
       testProperty "HashMap-foldl" $ foldlkey @Key @Int HM.toList HM.foldlWithKey',
       testProperty "size-length-toList" $ sizeProp @Key @Int HM.toList HM.size,
-      testPropertyN 1000 "union-intersect-property" $ setprop @Key @Int HM.unionWithKey HM.intersection,
+      testPropertyN 10 "union-intersect-property" $ setprop @Key @Int HM.unionWithKey HM.intersection,
       testProperty "lookup-insert" $ lookupinsert @Key @Int HM.lookup HM.insert,
       testProperty "lookup-delete" $ lookupdelete @Key @Int HM.lookup HM.delete,
-      testPropertyN 1000 "union is associative" $ assoc @Key @Int HM.union,
-      testPropertyN 1000 "unionWith is commutative" $ commutes @Key @Int (HM.unionWith (+)), -- (unionwith f) is commutative if 'f' is commutative
-      testPropertyN 1000 "intersect is associative" $ assoc @Key @Int HM.intersection,
-      testPropertyN 1000 "intersectWith is commutative" $ commutes @Key @Int (HM.intersectionWith (+)), -- (unionwith f) is commutative if 'f' is commutative
+      testPropertyN 10 "union is associative" $ assoc @Key @Int HM.union,
+      -- (unionwith f) is commutative if 'f' is commutative
+      testPropertyN 10 "unionWith is commutative" $ commutes @Key @Int (HM.unionWith (+)),
+      testPropertyN 10 "intersect is associative" $ assoc @Key @Int HM.intersection,
+      -- (unionwith f) is commutative if 'f' is commutative
+      testPropertyN 10 "intersectWith is commutative" $ commutes @Key @Int (HM.intersectionWith (+)),
       testProperty "ascending fold == descending fold with commutative operator" ascFoldDescFold,
       testProperty "lookupMin finds the smallest key" (minKey @Int),
       testProperty "lookupMax finds the largest key" (maxKey @Int),
       testProperty "(mapWithKey f) applies 'f' to every value" mapWorks,
       testProperty "foldOverIntersection folds over the intersection" foldintersect,
       testProperty "restrictKeys and withoutKeys partition a KeyMap" withoutRestrict,
-      testPropertyN 500 "splitLookup pieces add to the whole" splitwhole,
+      testPropertyN 5 "splitLookup pieces add to the whole" splitwhole,
       testCaseInfo "Keys are uniformly distributed" (testStatistics 100000)
     ]
 
