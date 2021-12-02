@@ -79,7 +79,6 @@ import Data.Compact.SmallArray
     withMutArray_,
   )
 import Data.Foldable (foldl')
-import Data.Primitive.SmallArray ()
 import qualified Data.Primitive.SmallArray as Small
 import Data.Set (Set)
 import qualified Data.Set as Set

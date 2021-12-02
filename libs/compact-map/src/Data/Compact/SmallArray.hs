@@ -26,9 +26,6 @@ fromlist = Small.smallArrayFromList
 
 tolist = Fold.toList
 
--- catenate = catArray
--- merge = mergeArray
-
 mindex :: MArray s a -> Int -> ST s a
 msize :: MArray s a -> Int
 mnew :: Int -> ST s (MArray s a)
