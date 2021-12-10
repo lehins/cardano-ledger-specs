@@ -66,31 +66,40 @@ instance (Split k, Arbitrary k, Arbitrary a) => Arbitrary (SplitMap k a) where
 -- ===============================================
 -- Property tests between SplitMaps
 
-ascFoldDescFoldx :: SplitMap k Int -> Property
-ascFoldDescFoldx x = foldrWithKey' (\_key ans v -> ans + v) 0 x === foldlWithKey' (\ans _key v -> v + ans) 0 x
+ascFoldDescFoldx :: Split k => SplitMap k Int -> Property
+ascFoldDescFoldx x =
+  foldrWithKey' (\_key ans v -> ans + v) 0 x ===
+  foldlWithKey' (\ans _key v -> v + ans) 0 x
 
-allKeyx :: (k -> Bool) -> SplitMap k t -> Bool
+allKeyx :: Split k => (k -> Bool) -> SplitMap k t -> Bool
 allKeyx p = foldlWithKey' (\ans key _v -> p key && ans) True
 
-allValx :: (t -> Bool) -> SplitMap k t -> Bool
+allValx :: Split k => (t -> Bool) -> SplitMap k t -> Bool
 allValx p = foldlWithKey' (\ans _key v -> p v && ans) True
 
 minKeyx :: (Split k, Show k, Show a, Ord k) => SplitMap k a -> Property
 minKeyx x =
   case lookupMin x of
-    Just (k, _v) -> counterexample ("min=" ++ show k ++ "map=\n" ++ show x) (allKeyx (\x1 -> x1 >= k) x)
+    Just (k, _v) ->
+      counterexample ("min=" ++ show k ++ "map=\n" ++ show x) (allKeyx (\x1 -> x1 >= k) x)
     Nothing -> True === True
 
 maxKeyx :: (Split k, Show k, Show a, Ord k) => SplitMap k a -> Property
-maxKeyx x = case lookupMax x of
-  Nothing -> True === True
-  Just (k, _v) -> counterexample ("max=" ++ show k ++ "map=\n" ++ show x) (allKeyx (\x1 -> x1 <= k) x === True)
+maxKeyx x =
+  case lookupMax x of
+    Nothing -> True === True
+    Just (k, _v) ->
+      counterexample
+        ("max=" ++ show k ++ "map=\n" ++ show x)
+        (allKeyx (<= k) x === True)
 
-mapWorksx :: SplitMap k Int -> Property
+mapWorksx :: Split k => SplitMap k Int -> Property
 mapWorksx x = allValx (== (99 :: Int)) (mapWithKey (\_key _x -> 99) x) === True
 
-foldintersectS :: forall k. SplitMap k Int -> SplitMap k Int -> Property
-foldintersectS x y = foldOverIntersection (\ans _key u _v -> ans + u) 0 x y === foldlWithKey' (\ans _key u -> ans + u) 0 (intersection x y)
+foldintersectS :: forall k. Split k => SplitMap k Int -> SplitMap k Int -> Property
+foldintersectS x y =
+  foldOverIntersection (\ans _key u _v -> ans + u) 0 x y ===
+  foldlWithKey' (\ans _key u -> ans + u) 0 (intersection x y)
 
 withoutRestrictS :: (Eq k, Split k, Show k) => SplitMap k Int -> Set k -> Property
 withoutRestrictS m domset = union (withoutKeysSet m domset) (restrictKeysSet m domset) === m
@@ -115,7 +124,7 @@ testWhen xs ys = intersectionWhen p xs ys == filterWithKey q (intersectionWith r
   where
     q _k v = even v
     r _u v = v
-    p k u v = if (q k v) then Just (r u v) else Nothing
+    p k u v = if q k v then Just (r u v) else Nothing
 
 -- ===============================================
 

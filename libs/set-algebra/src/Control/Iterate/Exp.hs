@@ -6,6 +6,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 
 -- | This module provides deep embeddings of three things
 --   1) Exp is a deep embedding of expressions over Sets and Maps as a typed data structure.
@@ -333,10 +334,10 @@ constant :: Show c => c -> Fun (a -> b -> c)
 constant c = Fun (Lam P1 P2 (Lit c)) (\_x _y -> c)
 
 -- Used in compile (RExclude RRestrict cases)
-rngElem :: (Ord rng, Iter f) => f rng v -> Fun (dom -> rng -> Bool)
+rngElem :: (Ord rng, IKey f rng, Iter f) => f rng v -> Fun (dom -> rng -> Bool)
 rngElem realset = Fun (Lam P1 P2 (HasKey X2 realset)) (\_x y -> haskey y realset) -- x is ignored and realset is supplied
 
-domElem :: (Ord dom, Iter f) => f dom v -> Fun (dom -> rng -> Bool)
+domElem :: (Ord dom, IKey f dom, Iter f) => f dom v -> Fun (dom -> rng -> Bool)
 domElem realset = Fun (Lam P1 P2 (HasKey X1 realset)) (\x _y -> haskey x realset) -- y is ignored and realset is supplied
 
 rngFst :: Fun (x -> (a, b) -> a)
@@ -379,7 +380,7 @@ lift f = Fun (Lift f) f
 -- =================================================================================
 
 data Query k v where
-  BaseD :: (Iter f, Ord k) => BaseRep f k v -> f k v -> Query k v
+  BaseD :: (IKey f k, Iter f) => BaseRep f k v -> f k v -> Query k v
   ProjectD :: Ord k => Query k v -> Fun (k -> v -> u) -> Query k u
   AndD :: Ord k => Query k v -> Query k w -> Query k (v, w)
   ChainD :: (Ord k, Ord v) => Query k v -> Query v w -> Fun (k -> (v, w) -> u) -> Query k u
@@ -527,7 +528,7 @@ nxtQuery (OrD f g comb) = orStep nxtQuery f g comb
 nxtQuery (GuardD f p) = guardStep nxtQuery p f
 nxtQuery (DiffD f g) = do trip <- nxtQuery f; diffStep trip g
 
-lubQuery :: Ord a => a -> Query a b -> Collect (a, b, Query a b)
+lubQuery :: (Ord a, Ord b) => a -> Query a b -> Collect (a, b, Query a b)
 lubQuery key (BaseD rep x) = do (k, v, x2) <- lub key x; one (k, v, BaseD rep x2)
 lubQuery key (ProjectD x p) = projStep (lubQuery key) p x
 lubQuery key (AndD f g) = do triple1 <- lubQuery key f; triple2 <- lubQuery key g; andStep triple1 triple2
@@ -538,6 +539,7 @@ lubQuery key (GuardD f p) = guardStep (lubQuery key) p f
 lubQuery key (DiffD f g) = do trip <- lubQuery key f; diffStep trip g
 
 instance Iter Query where
+  type IKey Query k = Ord k
   nxt = nxtQuery
   lub = lubQuery
 
@@ -633,7 +635,7 @@ diffStep (k1, u1, f1) g =
       GT -> one (k1, u1, DiffD f1 g) -- the hasLub guarantees k1 <= k2, so this case is dead code
 
 -- ========== Rng ====================
-rngStep :: Ord v => Query k v -> Sett v ()
+rngStep :: (Ord k, Ord v) => Query k v -> Sett v ()
 rngStep dat = materialize SetR (loop dat)
   where
     loop x = do (_k, v, x2) <- nxt x; front (v, ()) (loop x2)

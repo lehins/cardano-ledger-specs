@@ -5,6 +5,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
 
 -- | Defines what types can be used in the SetAlgebra, and
 --   what operations those types must support (Iter, Basic, Embed)
@@ -24,6 +25,7 @@ import Data.Map.Internal (Map (..))
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
+import GHC.Exts
 
 -- ================= The Iter class =================================================
 -- The Set algebra include types that encode finite maps of some type. They
@@ -37,24 +39,29 @@ import qualified Data.Set as Set
 -- ===================================================================================
 
 class Iter f where
-  nxt :: f a b -> Collect (a, b, f a b)
-  lub :: Ord k => k -> f k b -> Collect (k, b, f k b)
+  type IKey f k :: Constraint
+  type IKey f k = ()
+  nxt :: IKey f k => f k b -> Collect (k, b, f k b)
+  lub :: IKey f k => k -> f k b -> Collect (k, b, f k b)
 
   -- The next few methods can all be defined via nxt and lub, but for base types there often exist
   -- much more efficent means, so the default definitions should be overwritten for such basic types.
   -- For compound types with Guards, these are often the only way to define them.
 
-  hasNxt :: f a b -> Maybe (a, b, f a b)
+  hasNxt :: IKey f k => f k b -> Maybe (k, b, f k b)
   hasNxt f = hasElem (nxt f)
-  hasLub :: Ord k => k -> f k b -> Maybe (k, b, f k b)
+  hasLub :: IKey f k => k -> f k b -> Maybe (k, b, f k b)
   hasLub a f = hasElem (lub a f)
-  haskey :: Ord key => key -> f key b -> Bool
+  haskey :: (Eq key, IKey f key) => key -> f key b -> Bool
   haskey k x = case hasLub k x of Nothing -> False; Just (key, _, _) -> k == key
-  isnull :: f k v -> Bool
+  isnull :: IKey f k => f k v -> Bool
   isnull f = isempty (nxt f)
-  lookup :: Ord key => key -> f key rng -> Maybe rng
-  lookup k x = case hasLub k x of Nothing -> Nothing; Just (key, v, _) -> if k == key then Just v else Nothing
-  element :: (Ord k) => k -> f k v -> Collect ()
+  lookup :: (Eq key, IKey f key) => key -> f key rng -> Maybe rng
+  lookup k x =
+    case hasLub k x of
+      Nothing -> Nothing
+      Just (key, v, _) -> if k == key then Just v else Nothing
+  element :: (Eq k, IKey f k) => k -> f k v -> Collect ()
   element k f = when (haskey k f)
 
 -- ==================================================================================================
@@ -65,16 +72,16 @@ class Iter f where
 -- Instances of this algebra are functional in that every key has exactly one value associated with it.
 class Iter f => Basic f where
   -- | in addpair the new value always prevails, to make a choice use 'addkv' which has a combining function that allows choice.
-  addpair :: (Ord k) => k -> v -> f k v -> f k v
+  addpair :: IKey f k => k -> v -> f k v -> f k v
   addpair k v f = addkv (k, v) f (\_old new -> new)
 
   -- | use (\ old new -> old) if you want the v in (f k v) to prevail, and use (\ old new -> new) if you want the v in (k,v) to prevail
-  addkv :: Ord k => (k, v) -> f k v -> (v -> v -> v) -> f k v
+  addkv :: IKey f k => (k, v) -> f k v -> (v -> v -> v) -> f k v
 
-  removekey :: (Ord k) => k -> f k v -> f k v
-  domain :: Ord k => f k v -> Set k
-  range :: Ord v => f k v -> Set v
-  emptyc :: Ord k => f k v
+  removekey :: IKey f k => k -> f k v -> f k v
+  domain :: (IKey f k, Ord k) => f k v -> Set k
+  range :: (IKey f k, Ord v) => f k v -> Set v
+  emptyc :: IKey f k => f k v
   emptyc = error ("emptyc only works on some types.")
 
 -- ===============================================================================================
@@ -105,7 +112,7 @@ instance Show (BaseRep f k v) where
 
 -- ========== Basic List ==============
 
-data List k v where UnSafeList :: Ord k => [(k, v)] -> List k v
+newtype List k v = UnSafeList [(k, v)]
 
 unList :: List k v -> [(k, v)]
 unList (UnSafeList xs) = xs
@@ -143,6 +150,7 @@ normalize combine ((k1, v1) : (k2, v2) : more) | k1 == k2 = normalize combine ((
 normalize combine (p : pairs) = p : normalize combine pairs
 
 instance Iter List where -- List is the only basic instance with non-linear nxt and lub. It also depends on
+  type IKey List k = Ord k
   nxt (UnSafeList []) = none -- key-value pairs being stored in ascending order. For small Lists (10 or so elements) this is OK.
   nxt (UnSafeList ((k, v) : xs)) = one (k, v, UnSafeList xs)
   lub k (UnSafeList xs) = case dropWhile (\(key, _v) -> key < k) xs of
@@ -187,6 +195,7 @@ instance Basic Single where
   emptyc = Fail
 
 instance Iter Single where
+  type IKey Single k = Ord k
   nxt (Single k v) = Collect (\ans f -> f (k, v, Fail) ans)
   nxt (SetSingle k) = Collect (\ans f -> f (k, (), Fail) ans)
   nxt Fail = Collect (\ans _f -> ans)
@@ -225,6 +234,7 @@ instance Show key => Show (Sett key ()) where
 deriving instance Eq k => Eq (Sett k ())
 
 instance Iter Sett where
+  type IKey Sett k = Ord k
   nxt (Sett m) = Collect (\ans f -> if Set.null m then ans else let (k, nextm) = Set.deleteFindMin m in f (k, (), Sett nextm) ans)
   lub key (Sett m) =
     Collect
@@ -258,6 +268,7 @@ instance Ord v => Basic (BiMap v) where
   emptyc = error ("emptyc cannot be defined for BiMap, use the variable: biMapEmpty :: BiMap v k v")
 
 instance Ord v => Iter (BiMap v) where
+  type IKey (BiMap v) k = Ord k
   nxt (MkBiMap left right) =
     Collect
       ( \ans f ->
@@ -289,6 +300,7 @@ instance Basic Map.Map where
   emptyc = Map.empty
 
 instance Iter Map.Map where
+  type IKey Map k = Ord k
   nxt m =
     Collect
       ( \ans f ->
@@ -313,6 +325,7 @@ instance Iter Map.Map where
 -- ============== Basic the two-level SplitMap =========================
 
 instance Iter SplitMap where
+  type IKey SplitMap k = Split k
   nxt (SplitMap imap) =
     case IntMap.minViewWithKey imap of
       Nothing -> none
