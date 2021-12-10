@@ -3,14 +3,14 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
 
--- | A SplitMap is a nested map, when the key can be broken into two parts: 1) an Int, and 2) a Key.
---   Cutom designed for maps whose Domain is a TxIn. Should take up significantly less space than Data.Map
 module Data.Compact.SplitMap where
 
+import Control.DeepSeq
 import Data.Compact.KeyMap (Key (..), KeyMap, PDoc, ppKeyMap, ppList, ppSexp)
 import qualified Data.Compact.KeyMap as KeyMap
-import Data.Foldable (foldl')
+import qualified Data.Foldable as F (foldl')
 import qualified Data.IntMap as IntMap
 import Data.IntMap.Strict (IntMap)
 import Data.Map.Internal (Map (..), link, link2)
@@ -19,6 +19,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Set.Internal as IT
 import Data.Text (pack)
+import qualified GHC.Exts as Exts
 import Prettyprinter
 import Prelude hiding (lookup)
 
@@ -30,8 +31,24 @@ instance Split (Int, Key) where
   splitKey = id
   joinKey = (,)
 
+-- | A SplitMap is a nested map, when the key can be broken into two parts: 1)
+--   an Int, and 2) a Key. Custom designed for maps whose Domain is a
+--   TxIn. Should take up significantly less space than `Map.Map`
 data SplitMap k v where
-  SplitMap :: Split k => IntMap (KeyMap v) -> SplitMap k v
+  SplitMap :: Split k => !(IntMap (KeyMap v)) -> SplitMap k v
+
+instance NFData v => NFData (SplitMap k v) where
+  rnf (SplitMap sp) = rnf sp
+
+-- instance NoThunks v => NoThunks (SplitMap k v) where
+--   rnf (SplitMap sp) = rnf sp
+
+instance (Split k) => Exts.IsList (SplitMap k v) where
+  type Item (SplitMap k v) = (k, v)
+  fromList = fromList
+  {-# INLINE fromList #-}
+  toList = toList
+  {-# INLINE toList #-}
 
 -- | There is an invariant that every Int in the IntMap has a non-null KeyMap
 --   this should hold for every 'k' and 'SplitMap k v'
@@ -228,6 +245,8 @@ intersectSplitMap p sp (Bin _ k u l r) =
 
 -- ============================================================================
 -- Fold operations
+foldl' :: forall k v ans. (ans -> v -> ans) -> ans -> SplitMap k v -> ans
+foldl' comb = foldlWithKey' (\acc _ -> comb acc)
 
 -- | Strict fold over the pairs in descending order of keys.
 foldlWithKey' :: forall k v ans. (ans -> k -> v -> ans) -> ans -> SplitMap k v -> ans
@@ -238,6 +257,9 @@ foldlWithKey' comb ans0 (SplitMap imap) = IntMap.foldlWithKey' comb2 ans0 imap
       where
         comb3 :: ans -> Key -> v -> ans
         comb3 ans2 key v = comb ans2 (joinKey n key) v
+
+foldr' :: forall k v ans. (ans -> v -> ans) -> ans -> SplitMap k v -> ans
+foldr' comb = foldrWithKey' (const comb)
 
 -- | Strict fold over the pairs in ascending order of keys.
 foldrWithKey' :: forall k v ans. (k -> ans -> v -> ans) -> ans -> SplitMap k v -> ans
@@ -370,7 +392,7 @@ splitLookup k (SplitMap imap) =
 
 -- | In case of duplicate keys, the pair closer to the end of the list wins.
 fromList :: Split k => [(k, v)] -> SplitMap k v
-fromList pairs = foldl' accum empty pairs
+fromList pairs = F.foldl' accum empty pairs
   where
     accum mp (k, v) = insert k v mp
 
@@ -379,6 +401,12 @@ toList :: SplitMap k v -> [(k, v)]
 toList mp = foldrWithKey' accum [] mp
   where
     accum k pairs v = (k, v) : pairs
+
+keys :: SplitMap k v -> [k]
+keys = foldrWithKey' (\k acc _ -> k : acc) []
+
+elems :: SplitMap k v -> [v]
+elems = foldrWithKey' (\_ acc v -> v : acc) []
 
 instance (Split k, Eq k, Eq v) => Eq (SplitMap k v) where
   x == y = toList x == toList y
