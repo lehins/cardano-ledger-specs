@@ -103,6 +103,7 @@ import Prettyprinter
 import qualified Prettyprinter.Internal as Pretty
 import System.Random.Stateful (Uniform (..))
 import Prelude hiding (lookup)
+import NoThunks.Class
 
 -- ==========================================================================
 -- bitsPerSegment, Segments, Paths. Breaking a Key into a sequence of small components
@@ -217,6 +218,17 @@ data KeyMap v
       {-# UNPACK #-} !(Small.SmallArray (KeyMap v))
   | Full {-# UNPACK #-} !(Small.SmallArray (KeyMap v)) -- segmentMaxValue subtrees
   deriving (NFData, Generic)
+
+instance NoThunks v => NoThunks (KeyMap v) where
+  showTypeOf _ = "KeyMap"
+  wNoThunks ctxt = \case
+    Empty -> return Nothing
+    Leaf _ v -> wNoThunks ctxt v
+    One _ km -> wNoThunks ctxt km
+    Two _ km1 km2 -> noThunksInValues ctxt [km1, km2]
+    BitmapIndexed _ arr -> noThunksInValues ctxt $ tolist arr
+    Full arr -> noThunksInValues ctxt $ tolist arr
+
 
 empty :: KeyMap v
 empty = Empty
