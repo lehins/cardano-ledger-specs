@@ -32,6 +32,7 @@ import Control.SetAlgebra (range)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Compact.HashMap (toKey)
 import Data.Compact.KeyMap as KeyMap
+import qualified Data.Compact.SplitMap as SplitMap
 import qualified Data.Compact.VMap as VMap
 import Data.Foldable as F
 import Data.Functor
@@ -77,6 +78,12 @@ noSharing = Fold (\ !m !(!k, !v) -> Map.insert k v m) mempty id
 
 noSharing_ :: UTxOFold (Map.Map (TxIn C) ())
 noSharing_ = Fold (\ !m !(!k, _) -> Map.insert k () m) mempty id
+
+noSharingSplitMap :: Fold (TxIn C, a) (SplitMap.SplitMap (TxIn C) a)
+noSharingSplitMap = Fold (\ !m !(!k, !v) -> SplitMap.insert k v m) mempty id
+
+noSharingSplitMap_ :: UTxOFold (SplitMap.SplitMap (TxIn C) ())
+noSharingSplitMap_ = Fold (\ !m !(!k, _) -> SplitMap.insert k () m) mempty id
 
 txIdSharing ::
   UTxOFold (Map.Map (TxId C) (IntMap.IntMap (Alonzo.TxOut CurrentEra)))
@@ -678,8 +685,8 @@ instance AggregateStat UTxOStats where
 countUTxOStats :: UTxO (AlonzoEra StandardCrypto) -> UTxOStats
 countUTxOStats (UTxO m) =
   UTxOStats
-    { usTxInStats = countTxInStats (Map.keys m),
-      usTxOutStats = countTxOutStats (Map.elems m)
+    { usTxInStats = countTxInStats (SplitMap.keys m),
+      usTxOutStats = countTxOutStats (SplitMap.elems m)
     }
 
 data AggregateStats = AggregateStats

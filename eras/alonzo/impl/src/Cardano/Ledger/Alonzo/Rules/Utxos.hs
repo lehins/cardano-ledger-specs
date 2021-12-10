@@ -34,7 +34,6 @@ import Cardano.Ledger.Alonzo.Tx
     DataHash,
     IsValid (..),
     ValidatedTx (..),
-    txouts,
   )
 import qualified Cardano.Ledger.Alonzo.TxBody as Alonzo
 import Cardano.Ledger.Alonzo.TxInfo (FailureDescription (..), ScriptResult (..))
@@ -57,16 +56,16 @@ import Cardano.Ledger.Shelley.LedgerState (PPUPState (..), UTxOState (..), keyRe
 import qualified Cardano.Ledger.Shelley.LedgerState as Shelley
 import Cardano.Ledger.Shelley.PParams (Update)
 import Cardano.Ledger.Shelley.Rules.Ppup (PPUP, PPUPEnv (..), PpupPredicateFailure)
-import Cardano.Ledger.Shelley.Rules.Utxo (UtxoEnv (..))
+import Cardano.Ledger.Shelley.Rules.Utxo (UtxoEnv (..), updateUTxOState)
 import Cardano.Ledger.Shelley.TxBody (DCert, Wdrl)
 import Cardano.Ledger.Shelley.UTxO (UTxO (..), balance, totalDeposits)
 import Cardano.Ledger.TxIn (TxIn (..))
 import Cardano.Ledger.Val as Val
 import Control.Monad.Except (MonadError (throwError))
 import Control.Monad.Trans.Reader (asks)
-import Control.SetAlgebra (eval, (∪), (⋪), (◁))
 import Control.State.Transition.Extended
 import Data.Coders
+import qualified Data.Compact.SplitMap as SplitMap
 import Data.Foldable (toList)
 import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
@@ -148,9 +147,7 @@ utxosTransition =
 
 scriptsValidateTransition ::
   forall era.
-  ( Show (Core.Value era), -- Arises because of the use of (∪) from SetAlgebra, needs Show to report problems.
-    Era era,
-    Environment (Core.EraRule "PPUP" era) ~ PPUPEnv era,
+  ( Environment (Core.EraRule "PPUP" era) ~ PPUPEnv era,
     State (Core.EraRule "PPUP" era) ~ PPUPState era,
     Signal (Core.EraRule "PPUP" era) ~ Maybe (Update era),
     Embed (Core.EraRule "PPUP" era) (UTXOS era),
@@ -172,11 +169,7 @@ scriptsValidateTransition ::
   ) =>
   TransitionRule (UTXOS era)
 scriptsValidateTransition = do
-  TRC
-    ( UtxoEnv slot pp poolParams genDelegs,
-      UTxOState utxo deposited fees pup incStake,
-      tx
-      ) <-
+  TRC (UtxoEnv slot pp poolParams genDelegs, u@(UTxOState utxo _ _ pup _), tx) <-
     judgmentContext
   let txb = body tx
       refunded = keyRefunds pp txb
@@ -213,23 +206,12 @@ scriptsValidateTransition = do
               ]
           )
           ()
-  pup' <-
+  ppup' <-
     trans @(Core.EraRule "PPUP" era) $
       TRC
         (PPUPEnv slot pp genDelegs, pup, strictMaybeToMaybe $ getField @"update" txb)
 
-  let utxoAdd = txouts @era txb -- These will be inserted into the UTxO
-  let utxoDel = eval (getField @"inputs" txb ◁ utxo) -- These will be deleted fromthe UTxO
-  let newIncStakeDistro = updateStakeDistribution @era incStake utxoDel utxoAdd
-
-  pure $
-    UTxOState
-      { _utxo = eval ((getField @"inputs" txb ⋪ utxo) ∪ utxoAdd),
-        _deposited = deposited <> depositChange,
-        _fees = fees <> getField @"txfee" txb,
-        _ppups = pup',
-        _stakeDistro = newIncStakeDistro
-      }
+  pure $! updateUTxOState u txb depositChange ppup'
 
 scriptsNotValidateTransition ::
   forall era.
@@ -283,15 +265,15 @@ scriptsNotValidateTransition = do
               ]
           )
           ()
-  pure $
-    us
-      { _utxo = eval (getField @"collateral" txb ⋪ utxo),
-        _fees = fees <> Val.coin (balance @era (eval (getField @"collateral" txb ◁ utxo))),
-        _stakeDistro =
-          updateStakeDistribution @era
-            (_stakeDistro us)
-            (eval (getField @"collateral" txb ◁ utxo))
-            (UTxO Map.empty)
+      {- utxoKeep = getField @"collateral" txb ⋪ utxo -}
+      {- utxoDel  = getField @"collateral" txb ◁ utxo -}
+      !(!utxoKeep, !utxoDel) =
+        SplitMap.extractKeysSet (unUTxO utxo) (getField @"collateral" txb)
+  pure
+    $! us
+      { _utxo = UTxO utxoKeep,
+        _fees = fees <> Val.coin (balance (UTxO utxoDel)),
+        _stakeDistro = updateStakeDistribution (_stakeDistro us) (UTxO utxoDel) mempty
       }
 
 data TagMismatchDescription

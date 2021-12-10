@@ -44,6 +44,7 @@ import Cardano.Ledger.BaseTypes
 import Cardano.Ledger.Coin
 import qualified Cardano.Ledger.Core as Core
 import Cardano.Ledger.Credential (Credential (..))
+import qualified Cardano.Ledger.Crypto as CC
 import Cardano.Ledger.Era (Crypto, Era, ValidateScript (..))
 import qualified Cardano.Ledger.Era as Era
 import qualified Cardano.Ledger.Mary.Value as Alonzo (Value)
@@ -68,7 +69,6 @@ import Cardano.Slotting.EpochInfo.API (epochInfoSlotToUTCTime)
 import Cardano.Slotting.Slot (SlotNo)
 import Control.Monad (unless)
 import Control.Monad.Trans.Reader (asks)
-import Control.SetAlgebra (dom, eval, (⊆), (◁), (➖))
 import Control.State.Transition.Extended
 import qualified Data.ByteString.Lazy as BSL (length)
 import Data.Coders
@@ -78,12 +78,14 @@ import Data.Coders
     decode,
     decodeList,
     decodeSet,
+    decodeSplitMap,
     encode,
     encodeFoldable,
     (!>),
     (<!),
   )
 import Data.Coerce (coerce)
+import qualified Data.Compact.SplitMap as SplitMap
 import Data.Foldable (foldl', toList)
 import qualified Data.Map.Strict as Map
 import Data.Ratio ((%))
@@ -203,6 +205,7 @@ deriving stock instance
 deriving stock instance
   ( Eq (Core.Value era),
     Eq (Core.TxOut era),
+    CC.Crypto (Crypto era),
     Eq (PredicateFailure (Core.EraRule "UTXOS" era))
   ) =>
   Eq (UtxoPredicateFailure era)
@@ -257,11 +260,13 @@ feesOK ::
   Core.Tx era ->
   UTxO era ->
   Rule (AlonzoUTXO era) 'Transition ()
-feesOK pp tx (UTxO m) = do
+feesOK pp tx (UTxO utxo) = do
   let txb = getField @"body" tx
       theFee = getField @"txfee" txb -- Coin supplied to pay fees
       collateral = getField @"collateral" txb -- Inputs allocated to pay theFee
-      utxoCollateral = eval (collateral ◁ m) -- restrict Utxo to those inputs we use to pay fees.
+      -- restrict Utxo to those inputs we use to pay fees.
+      -- (collateral ◁ utxo)
+      utxoCollateral = collateral SplitMap.◁ utxo
       bal = balance @era (UTxO utxoCollateral)
       minimumFee = minfee @era pp tx
       collPerc = getField @"_collateralPercentage" pp
@@ -272,7 +277,7 @@ feesOK pp tx (UTxO m) = do
     -- Part 3
     all vKeyLocked utxoCollateral
       ?! ScriptsNotPaidUTxO
-        (UTxO (Map.filter (not . vKeyLocked) utxoCollateral))
+        (UTxO (SplitMap.filter (not . vKeyLocked) utxoCollateral))
     -- Part 4
     (Val.scale (100 :: Natural) (Val.coin bal) >= Val.scale collPerc theFee)
       ?! InsufficientCollateral
@@ -347,26 +352,27 @@ utxoTransition = do
   {-   txins txb ≠ ∅   -}
   not (Set.null (getField @"inputs" txb)) ?!# InputSetEmptyUTxO
 
-  {-   feesOKp p tx utxo   -}
+  {-   feesOK pp tx utxo   -}
   feesOK pp tx utxo -- Generalizes the fee to small from earlier Era's
 
-  {-   (txins txb) ∪ (collateral txb)  ⊆ dom utxo   -}
-  eval (inputsAndCollateral ⊆ dom utxo)
-    ?! BadInputsUTxO (eval (inputsAndCollateral ➖ dom utxo))
+  {- badInputs = (txins txb ∪ collateral txb) ➖ dom utxo -}
+  let badInputs = Set.filter (`SplitMap.notMember` unUTxO utxo) inputsAndCollateral
+  {-   (txins txb) ∪ (collateral txb) ⊆ dom utxo   -}
+  Set.null badInputs ?! BadInputsUTxO badInputs
 
   {-   consumedpp utxo txb = producedpp poolParams txb    -}
   let consumed_ = consumed @era pp utxo txb
       produced_ = Shelley.produced @era pp (`Map.notMember` stakepools) txb
   consumed_ == produced_ ?! ValueNotConservedUTxO consumed_ produced_
 
-  {-   adaID  ∉ supp mint tx   -}
+  {-   adaID ∉ supp mint tx   -}
   -- Check that the mint field does not try to mint ADA.
   -- Here in the implementation, we store the adaId policyID in the coin field of the value.
   Val.coin (getField @"mint" txb) == Val.zero ?!# TriesToForgeADA
 
   {-   ∀ txout ∈ txouts txb, getValuetxout ≥ inject(uxoEntrySizetxout ∗ coinsPerUTxOWord p)   -}
   let (Coin coinsPerUTxOWord) = getField @"_coinsPerUTxOWord" pp
-      outputs = Map.elems $ unUTxO (txouts txb)
+      outputs = unUTxO (txouts txb)
       outputsTooSmall =
         filter
           ( \out ->
@@ -377,13 +383,13 @@ utxoTransition = do
                       v
                       (Val.inject $ Coin (utxoEntrySize out * coinsPerUTxOWord))
           )
-          outputs
+          (SplitMap.elems outputs)
   null outputsTooSmall ?! OutputTooSmallUTxO outputsTooSmall
 
   {-   ∀ txout ∈ txouts txb, serSize(getValuetxout) ≤ (maxTxSizep p)∗(maxValSizep pp)   -}
   -- use serialized length of Value because this Value size is being limited inside a serialized Tx
   let maxValSize = getField @"_maxValSize" pp
-      outputsTooBig = foldl' accum [] outputs
+      outputsTooBig = foldl' accum [] $ SplitMap.elems outputs
         where
           accum ans out =
             let v = getField @"value" out
@@ -402,7 +408,7 @@ utxoTransition = do
               AddrBootstrap addr -> bootstrapAddressAttrsSize addr > 64
               _ -> False
           )
-          outputs
+          (SplitMap.elems outputs)
   null outputsAttrsTooBig ?!# OutputBootAddrAttrsTooBig outputsAttrsTooBig
 
   {-   ∀(_ ↦ (a,_)) ∈ txouts txb, netId a = NetworkId   -}
@@ -589,12 +595,9 @@ decFail 8 = SumD WrongNetwork <! From <! D (decodeSet fromCBOR)
 decFail 9 = SumD WrongNetworkWithdrawal <! From <! D (decodeSet fromCBOR)
 decFail 10 = SumD OutputBootAddrAttrsTooBig <! D (decodeList fromCBOR)
 decFail 11 = SumD TriesToForgeADA
-decFail 12 =
-  SumD OutputTooBigUTxO
-    <! D
-      (decodeList fromCBOR)
+decFail 12 = SumD OutputTooBigUTxO <! D (decodeList fromCBOR)
 decFail 13 = SumD InsufficientCollateral <! From <! From
-decFail 14 = SumD ScriptsNotPaidUTxO <! From
+decFail 14 = SumD ScriptsNotPaidUTxO <! D (UTxO <$> decodeSplitMap fromCBOR fromCBOR)
 decFail 15 = SumD ExUnitsTooBigUTxO <! From <! From
 decFail 16 = SumD CollateralContainsNonADA <! From
 decFail 17 = SumD WrongNetworkInTxBody <! From <! From
