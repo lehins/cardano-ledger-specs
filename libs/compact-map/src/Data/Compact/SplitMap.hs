@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -20,6 +21,7 @@ import qualified Data.Set as Set
 import qualified Data.Set.Internal as IT
 import Data.Text (pack)
 import qualified GHC.Exts as Exts
+import NoThunks.Class
 import Prettyprinter
 import Prelude hiding (lookup)
 
@@ -34,16 +36,10 @@ instance Split (Int, Key) where
 -- | A SplitMap is a nested map, when the key can be broken into two parts: 1)
 --   an Int, and 2) a Key. Custom designed for maps whose Domain is a
 --   TxIn. Should take up significantly less space than `Map.Map`
-data SplitMap k v where
-  SplitMap :: Split k => !(IntMap (KeyMap v)) -> SplitMap k v
+newtype SplitMap k v = SplitMap (IntMap (KeyMap v))
+  deriving (NFData, NoThunks)
 
-instance NFData v => NFData (SplitMap k v) where
-  rnf (SplitMap sp) = rnf sp
-
--- instance NoThunks v => NoThunks (SplitMap k v) where
---   rnf (SplitMap sp) = rnf sp
-
-instance (Split k) => Exts.IsList (SplitMap k v) where
+instance Split k => Exts.IsList (SplitMap k v) where
   type Item (SplitMap k v) = (k, v)
   fromList = fromList
   {-# INLINE fromList #-}
@@ -52,7 +48,7 @@ instance (Split k) => Exts.IsList (SplitMap k v) where
 
 -- | There is an invariant that every Int in the IntMap has a non-null KeyMap
 --   this should hold for every 'k' and 'SplitMap k v'
-invariant :: k -> SplitMap k v -> Bool
+invariant :: Split k => k -> SplitMap k v -> Bool
 invariant k (SplitMap imap) =
   let (n, _key) = splitKey k
    in case IntMap.lookup n imap of
@@ -62,11 +58,11 @@ invariant k (SplitMap imap) =
 -- | To maintain the invariant, we define 'insertNormForm'
 --   Insert a KeyMap into an IntMap, unless it is empty, if so, return the IntMap unchanged
 --   we assume the Int 'n' is not already in the IntMap 'imap', and each call site should check this invariant.
-insertNormForm :: Split k => IntMap.Key -> KeyMap.KeyMap v -> IntMap.IntMap (KeyMap.KeyMap v) -> SplitMap k v
+insertNormForm :: IntMap.Key -> KeyMap.KeyMap v -> IntMap.IntMap (KeyMap.KeyMap v) -> SplitMap k v
 insertNormForm _ KeyMap.Empty imap = SplitMap imap
 insertNormForm n kmap imap = SplitMap (IntMap.insert n kmap imap)
 
-empty :: forall k v. Split k => SplitMap k v
+empty :: SplitMap k v
 empty = SplitMap IntMap.empty
 
 null :: SplitMap k v -> Bool
@@ -75,7 +71,7 @@ null (SplitMap imap) = IntMap.null imap
 -- ================================================
 -- Insert and delete operations
 
-insertWithKey :: forall k v. (k -> v -> v -> v) -> k -> v -> SplitMap k v -> SplitMap k v
+insertWithKey :: forall k v. Split k => (k -> v -> v -> v) -> k -> v -> SplitMap k v -> SplitMap k v
 {- Maybe we should benchmark these two
 insertWithKey combine k v (SplitMap imap) =
   SplitMap (IntMap.insertWith combine2 n (KeyMap.insert key v KeyMap.Empty) imap)
@@ -91,13 +87,13 @@ insertWithKey combine k v (SplitMap imap) =
     combine2 :: KeyMap v -> KeyMap v -> KeyMap v
     combine2 _km1 km2 = KeyMap.insertWith @v (combine k) key v km2
 
-insertWith :: forall k v. (v -> v -> v) -> k -> v -> SplitMap k v -> SplitMap k v
+insertWith :: forall k v. Split k => (v -> v -> v) -> k -> v -> SplitMap k v -> SplitMap k v
 insertWith comb k v mp = insertWithKey (\_ x y -> comb x y) k v mp
 
-insert :: forall k v. k -> v -> SplitMap k v -> SplitMap k v
+insert :: forall k v. Split k => k -> v -> SplitMap k v -> SplitMap k v
 insert k v mp = insertWithKey (\_k v1 _v2 -> v1) k v mp
 
-delete :: k -> SplitMap k v -> SplitMap k v
+delete :: Split k => k -> SplitMap k v -> SplitMap k v
 delete k (SplitMap imap) = SplitMap (IntMap.update fix n imap)
   where
     (n, key) = splitKey k
@@ -108,7 +104,7 @@ delete k (SplitMap imap) = SplitMap (IntMap.update fix n imap)
 -- ==================================================================
 -- lookup and map and Functor instance
 
-lookup :: k -> SplitMap k v -> Maybe v
+lookup :: Split k => k -> SplitMap k v -> Maybe v
 lookup k (SplitMap imap) =
   case IntMap.lookup n imap of
     Nothing -> Nothing
@@ -116,21 +112,21 @@ lookup k (SplitMap imap) =
   where
     (n, key) = splitKey k
 
-member :: k -> SplitMap k v -> Bool
+member :: Split k => k -> SplitMap k v -> Bool
 member k smap = case lookup k smap of
   Nothing -> False
   Just _ -> True
 
-mapWithKey :: forall k v u. (k -> v -> u) -> SplitMap k v -> SplitMap k u
+mapWithKey :: forall k v u. Split k => (k -> v -> u) -> SplitMap k v -> SplitMap k u
 mapWithKey f (SplitMap imap) = SplitMap (IntMap.mapWithKey g imap)
   where
     g :: Int -> KeyMap v -> KeyMap u
     g n kmap = KeyMap.mapWithKey (\key v -> f (joinKey n key) v) kmap
 
-instance Functor (SplitMap k) where
+instance Split k => Functor (SplitMap k) where
   fmap f x = mapWithKey (\_ v -> f v) x
 
-filterWithKey :: (k -> v -> Bool) -> SplitMap k v -> SplitMap k v
+filterWithKey :: Split k => (k -> v -> Bool) -> SplitMap k v -> SplitMap k v
 filterWithKey p smap@(SplitMap _) = foldlWithKey' accum empty smap
   where
     accum ans k v = if p k v then insert k v ans else ans
@@ -138,11 +134,17 @@ filterWithKey p smap@(SplitMap _) = foldlWithKey' accum empty smap
 -- =====================================================================
 -- Union operations
 
-unionWithKey :: forall k v. (k -> v -> v -> v) -> SplitMap k v -> SplitMap k v -> SplitMap k v
+unionWithKey ::
+  forall k v.
+  Split k =>
+  (k -> v -> v -> v) ->
+  SplitMap k v ->
+  SplitMap k v ->
+  SplitMap k v
 unionWithKey combine (SplitMap imap1) (SplitMap imap2) = SplitMap (IntMap.unionWithKey comb imap1 imap2)
   where
     comb :: Int -> KeyMap v -> KeyMap v -> KeyMap v
-    comb n x y = KeyMap.unionWithKey (\key v1 v2 -> combine (joinKey n key) v1 v2) x y
+    comb n x y = KeyMap.unionWithKey (\key -> combine (joinKey n key)) x y
 
 unionWith :: forall k v. (v -> v -> v) -> SplitMap k v -> SplitMap k v -> SplitMap k v
 unionWith combine (SplitMap imap1) (SplitMap imap2) = SplitMap (IntMap.unionWith comb imap1 imap2)
@@ -159,29 +161,53 @@ union (SplitMap imap1) (SplitMap imap2) = SplitMap (IntMap.unionWith comb imap1 
 -- ============================================================================
 -- Intersection operations
 
-intersectionWithKey :: forall k u v w. (k -> u -> v -> w) -> SplitMap k u -> SplitMap k v -> SplitMap k w
+intersectionWithKey ::
+  forall k u v w.
+  Split k =>
+  (k -> u -> v -> w) ->
+  SplitMap k u ->
+  SplitMap k v ->
+  SplitMap k w
 intersectionWithKey combine (SplitMap imap1) (SplitMap imap2) = SplitMap (IntMap.intersectionWithKey comb imap1 imap2)
   where
     comb :: Int -> KeyMap u -> KeyMap v -> KeyMap w
     comb n x y = KeyMap.intersectionWithKey (\key v1 v2 -> combine (joinKey n key) v1 v2) x y
 
 -- | The intersection of 'x' and 'y', where the 'combine' function computes the range.
-intersectionWith :: forall k u v w. (u -> v -> w) -> SplitMap k u -> SplitMap k v -> SplitMap k w
+intersectionWith ::
+  forall k u v w.
+  Split k =>
+  (u -> v -> w) ->
+  SplitMap k u ->
+  SplitMap k v ->
+  SplitMap k w
 intersectionWith combine x y = intersectionWithKey (\_k u v -> combine u v) x y
 
 -- | The subset of 'x' with where the domain of 'x' appears in the domain of 'y'
-intersection :: forall k u v. SplitMap k u -> SplitMap k v -> SplitMap k u
+intersection :: forall k u v. Split k => SplitMap k u -> SplitMap k v -> SplitMap k u
 intersection x y = intersectionWithKey (\_ u _ -> u) x y
 
 -- | Like intersectionWithKey, except if the 'combine' function returns Nothing, the common
 --   key is NOT placed in the intersectionWhen result.
-intersectionWhen :: forall k u v w. (k -> u -> v -> Maybe w) -> SplitMap k u -> SplitMap k v -> SplitMap k w
+intersectionWhen ::
+  forall k u v w.
+  Split k =>
+  (k -> u -> v -> Maybe w) ->
+  SplitMap k u ->
+  SplitMap k v ->
+  SplitMap k w
 intersectionWhen combine (SplitMap imap1) (SplitMap imap2) = SplitMap (IntMap.intersectionWithKey comb imap1 imap2)
   where
     comb :: Int -> KeyMap u -> KeyMap v -> KeyMap w
     comb n x y = KeyMap.intersectionWhen (\key v1 v2 -> combine (joinKey n key) v1 v2) x y
 
-foldOverIntersection :: forall ans k u v. (ans -> k -> u -> v -> ans) -> ans -> SplitMap k u -> SplitMap k v -> ans
+foldOverIntersection ::
+     forall ans k u v. Split k
+  => (ans -> k -> u -> v -> ans)
+  -> ans
+  -> SplitMap k u
+  -> SplitMap k v
+  -> ans
 foldOverIntersection accum ans0 (SplitMap imap1) (SplitMap imap2) = foldIntersectIntMap accum2 ans0 imap1 imap2
   where
     accum2 :: Int -> KeyMap u -> KeyMap v -> ans -> ans
@@ -207,7 +233,7 @@ foldIntersectIntMap accum ans0 imap1 imap2 =
 -- | The intersection over the common domain 'k' of a Data.Map and a SplitMap
 --   Only those keys 'k' that meet the predicate 'p' are included.
 --   The result isa Data.Map
-intersectMapSplit :: (k -> v -> u -> Bool) -> Map.Map k v -> SplitMap k u -> Map.Map k v
+intersectMapSplit :: Split k => (k -> v -> u -> Bool) -> Map.Map k v -> SplitMap k u -> Map.Map k v
 intersectMapSplit _ Tip _ = Tip
 intersectMapSplit p (Bin _ k v l r) sp =
   case splitLookup k sp of
@@ -220,7 +246,7 @@ intersectMapSplit p (Bin _ k v l r) sp =
 -- | The intersection over the common domain 'k' of a Data.Set and a SplitMap
 --   Only those keys 'k' that meet the predicate 'p' are included.
 --   The result is a Data.Set
-intersectSetSplit :: (k -> u -> Bool) -> Set k -> SplitMap k u -> Set k
+intersectSetSplit :: Split k => (k -> u -> Bool) -> Set k -> SplitMap k u -> Set k
 intersectSetSplit _ IT.Tip _ = IT.Tip
 intersectSetSplit p (IT.Bin _ k l r) sp =
   case splitLookup k sp of
@@ -233,7 +259,7 @@ intersectSetSplit p (IT.Bin _ k l r) sp =
 -- | The intersection over the common domain 'k' of a SplitMap and a Data.Map.
 --   Only those keys 'k' that meet the predicate 'p' are included.
 --   The result isa SplitMap
-intersectSplitMap :: (k -> v -> u -> Bool) -> SplitMap k v -> Map.Map k u -> SplitMap k v
+intersectSplitMap :: Split k => (k -> v -> u -> Bool) -> SplitMap k v -> Map.Map k u -> SplitMap k v
 intersectSplitMap _ (SplitMap _) Tip = empty
 intersectSplitMap p sp (Bin _ k u l r) =
   case splitLookup k sp of
@@ -245,11 +271,11 @@ intersectSplitMap p sp (Bin _ k u l r) =
 
 -- ============================================================================
 -- Fold operations
-foldl' :: forall k v ans. (ans -> v -> ans) -> ans -> SplitMap k v -> ans
+foldl' :: forall k v ans. Split k => (ans -> v -> ans) -> ans -> SplitMap k v -> ans
 foldl' comb = foldlWithKey' (\acc _ -> comb acc)
 
 -- | Strict fold over the pairs in descending order of keys.
-foldlWithKey' :: forall k v ans. (ans -> k -> v -> ans) -> ans -> SplitMap k v -> ans
+foldlWithKey' :: forall k v ans. Split k => (ans -> k -> v -> ans) -> ans -> SplitMap k v -> ans
 foldlWithKey' comb ans0 (SplitMap imap) = IntMap.foldlWithKey' comb2 ans0 imap
   where
     comb2 :: ans -> Int -> KeyMap v -> ans
@@ -258,11 +284,11 @@ foldlWithKey' comb ans0 (SplitMap imap) = IntMap.foldlWithKey' comb2 ans0 imap
         comb3 :: ans -> Key -> v -> ans
         comb3 ans2 key v = comb ans2 (joinKey n key) v
 
-foldr' :: forall k v ans. (ans -> v -> ans) -> ans -> SplitMap k v -> ans
+foldr' :: forall k v ans. Split k =>  (ans -> v -> ans) -> ans -> SplitMap k v -> ans
 foldr' comb = foldrWithKey' (const comb)
 
 -- | Strict fold over the pairs in ascending order of keys.
-foldrWithKey' :: forall k v ans. (k -> ans -> v -> ans) -> ans -> SplitMap k v -> ans
+foldrWithKey' :: forall k v ans. Split k => (k -> ans -> v -> ans) -> ans -> SplitMap k v -> ans
 foldrWithKey' comb ans0 (SplitMap imap) = IntMap.foldrWithKey' comb2 ans0 imap
   where
     comb2 :: Int -> KeyMap v -> ans -> ans
@@ -275,7 +301,7 @@ foldrWithKey' comb ans0 (SplitMap imap) = IntMap.foldrWithKey' comb2 ans0 imap
 -- These 'restrictKeys' functions assume the structure holding the 'good' keys is small
 -- An alternate approach is to use cross-type 'intersection' operations
 
-restrictKeysSet :: forall k a. SplitMap k a -> Set k -> SplitMap k a
+restrictKeysSet :: forall k a. Split k => SplitMap k a -> Set k -> SplitMap k a
 restrictKeysSet splitmap@(SplitMap _) kset = Set.foldl' comb (SplitMap IntMap.empty) kset
   where
     comb :: SplitMap k a -> k -> SplitMap k a
@@ -283,7 +309,7 @@ restrictKeysSet splitmap@(SplitMap _) kset = Set.foldl' comb (SplitMap IntMap.em
       Nothing -> smap
       Just a -> insert k a smap
 
-restrictKeysMap :: forall k a b. SplitMap k a -> Map k b -> SplitMap k a
+restrictKeysMap :: forall k a b. Split k => SplitMap k a -> Map k b -> SplitMap k a
 restrictKeysMap splitmap@(SplitMap _) kmap = Map.foldlWithKey' comb (SplitMap IntMap.empty) kmap
   where
     comb :: SplitMap k a -> k -> b -> SplitMap k a
@@ -291,7 +317,7 @@ restrictKeysMap splitmap@(SplitMap _) kmap = Map.foldlWithKey' comb (SplitMap In
       Nothing -> smap
       Just a -> insert k a smap
 
-restrictKeysSplit :: forall k a b. SplitMap k a -> SplitMap k b -> SplitMap k a
+restrictKeysSplit :: forall k a b. Split k => SplitMap k a -> SplitMap k b -> SplitMap k a
 restrictKeysSplit splitmap@(SplitMap _) ksplit = foldlWithKey' comb (SplitMap IntMap.empty) ksplit
   where
     comb :: SplitMap k a -> k -> b -> SplitMap k a
@@ -309,26 +335,26 @@ restrictKeys smap1 smap2 = foldOverIntersection comb empty smap1 smap2
 -- These 'withoutKeys' functions assume the structure holding the 'bad' keys is small
 -- An alternate approach is to use cross-type 'intersection' operations
 
-withoutKeysSet :: forall k a. SplitMap k a -> Set k -> SplitMap k a
+withoutKeysSet :: forall k a. Split k => SplitMap k a -> Set k -> SplitMap k a
 withoutKeysSet splitmap@(SplitMap _) kset = Set.foldl' comb splitmap kset
   where
     comb :: SplitMap k a -> k -> SplitMap k a
     comb smap k = delete k smap
 
-withoutKeysMap :: forall k a b. SplitMap k a -> Map k b -> SplitMap k a
+withoutKeysMap :: forall k a b. Split k => SplitMap k a -> Map k b -> SplitMap k a
 withoutKeysMap splitmap@(SplitMap _) kset = Map.foldlWithKey' comb splitmap kset
   where
     comb :: SplitMap k a -> k -> b -> SplitMap k a
     comb smap k _ = delete k smap
 
-withoutKeysSplit :: forall k a b. SplitMap k a -> SplitMap k b -> SplitMap k a
+withoutKeysSplit :: forall k a b. Split k => SplitMap k a -> SplitMap k b -> SplitMap k a
 withoutKeysSplit splitmap@(SplitMap _) kset = foldlWithKey' comb splitmap kset
   where
     comb :: SplitMap k a -> k -> b -> SplitMap k a
     comb smap k _ = delete k smap
 
 -- | Remove the keys using the intersection operation. if 'smap2' is small use one of the other withoutKeysXX functions.
-withoutKeys :: forall k a b. SplitMap k a -> SplitMap k b -> SplitMap k a
+withoutKeys :: forall k a b. Split k => SplitMap k a -> SplitMap k b -> SplitMap k a
 withoutKeys smap1 smap2 = foldOverIntersection comb smap1 smap1 smap2
   where
     comb ans k _a _b = delete k ans
@@ -336,7 +362,7 @@ withoutKeys smap1 smap2 = foldOverIntersection comb smap1 smap1 smap2
 -- ==============================================================
 -- Min Max operations
 
-lookupMin :: SplitMap k v -> Maybe (k, v)
+lookupMin :: Split k => SplitMap k v -> Maybe (k, v)
 lookupMin (SplitMap imap) =
   case IntMap.minViewWithKey imap of
     Nothing -> Nothing
@@ -345,7 +371,7 @@ lookupMin (SplitMap imap) =
         Nothing -> Nothing
         Just (k, v) -> Just (joinKey n k, v)
 
-lookupMax :: SplitMap k v -> Maybe (k, v)
+lookupMax :: Split k => SplitMap k v -> Maybe (k, v)
 lookupMax (SplitMap imap) =
   case IntMap.maxViewWithKey imap of
     Nothing -> Nothing
@@ -354,7 +380,7 @@ lookupMax (SplitMap imap) =
         Nothing -> Nothing
         Just (k, v) -> Just (joinKey n k, v)
 
-minViewWithKey :: SplitMap k v -> Maybe ((k, v), SplitMap k v)
+minViewWithKey :: Split k => SplitMap k v -> Maybe ((k, v), SplitMap k v)
 minViewWithKey (SplitMap imap) =
   case IntMap.minViewWithKey imap of
     Nothing -> Nothing
@@ -363,7 +389,7 @@ minViewWithKey (SplitMap imap) =
         Nothing -> Nothing
         Just ((k, v), kmap2) -> Just ((joinKey n k, v), insertNormForm n kmap2 imap2)
 
-maxViewWithKey :: SplitMap k v -> Maybe ((k, v), SplitMap k v)
+maxViewWithKey :: Split k => SplitMap k v -> Maybe ((k, v), SplitMap k v)
 maxViewWithKey (SplitMap imap) =
   case IntMap.maxViewWithKey imap of
     Nothing -> Nothing
@@ -375,7 +401,7 @@ maxViewWithKey (SplitMap imap) =
 -- ====================================================
 
 -- | Performs a split but also returns whether the pivot key was found in the original map.
-splitLookup :: k -> SplitMap k a -> (SplitMap k a, Maybe a, SplitMap k a)
+splitLookup :: Split k =>  k -> SplitMap k a -> (SplitMap k a, Maybe a, SplitMap k a)
 splitLookup k (SplitMap imap) =
   let (n, key) = splitKey k
    in case IntMap.splitLookup n imap of
@@ -397,15 +423,15 @@ fromList pairs = F.foldl' accum empty pairs
     accum mp (k, v) = insert k v mp
 
 -- | Generates the list in ascending order of k
-toList :: SplitMap k v -> [(k, v)]
+toList :: Split k => SplitMap k v -> [(k, v)]
 toList mp = foldrWithKey' accum [] mp
   where
     accum k pairs v = (k, v) : pairs
 
-keys :: SplitMap k v -> [k]
+keys :: Split k => SplitMap k v -> [k]
 keys = foldrWithKey' (\k acc _ -> k : acc) []
 
-elems :: SplitMap k v -> [v]
+elems :: Split k => SplitMap k v -> [v]
 elems = foldrWithKey' (\_ acc v -> v : acc) []
 
 instance (Split k, Eq k, Eq v) => Eq (SplitMap k v) where
