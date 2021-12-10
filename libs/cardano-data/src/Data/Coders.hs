@@ -65,6 +65,7 @@ module Data.Coders
     encodeFoldableEncoder,
     encodeMap,
     encodeVMap,
+    decodeSplitMap,
     wrapCBORMap,
     decodeMap,
     decodeVMap,
@@ -133,6 +134,7 @@ import Control.Monad (replicateM, unless, when)
 import Control.Monad.Trans
 import Control.Monad.Trans.Identity
 import qualified Data.Compact.VMap as VMap
+import qualified Data.Compact.SplitMap as SMap
 import Data.Foldable (foldl')
 import Data.Functor.Compose (Compose (..))
 import qualified Data.Map as Map
@@ -321,6 +323,9 @@ decodeVMap decodeKey decodeValue = decodeMapByKey decodeKey (const decodeValue)
 
 decodeMap :: Ord a => Decoder s a -> Decoder s b -> Decoder s (Map.Map a b)
 decodeMap decodeKey decodeValue = decodeMapByKey decodeKey (const decodeValue)
+
+decodeSplitMap :: SMap.Split a => Decoder s a -> Decoder s b -> Decoder s (SMap.SplitMap a b)
+decodeSplitMap decodeKey decodeValue = decodeMapByKey decodeKey (const decodeValue)
 
 decodeMapByKey ::
   (Exts.IsList t, Exts.Item t ~ (k, v)) =>
