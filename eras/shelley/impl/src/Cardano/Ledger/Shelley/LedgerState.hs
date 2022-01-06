@@ -253,7 +253,7 @@ import Data.Coders
     decodeRecordNamed,
     (<!),
   )
-import qualified Data.Compact.ViewMap as VMap
+import qualified Data.Compact.VMap as VMap
 import Data.Constraint (Constraint)
 import Data.Default.Class (Default, def)
 import Data.Foldable (fold, toList)
