@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveAnyClass #-}
@@ -62,7 +63,7 @@ where
 import Cardano.Binary (FromCBOR (..), ToCBOR (..), encodeListLen)
 import Control.DeepSeq (NFData (..))
 import Control.Monad.Trans.State.Strict (StateT (..))
-import Data.Coders (decodeMap, decodeRecordNamed, encodeMap)
+import Data.Coders (decodeMap, decodeRecordNamed, decodeRecordNamedT, encodeMap)
 import qualified Data.Compact.VMap as VMap
 import Data.Foldable (Foldable (..))
 import Data.Map.Strict (Map)
@@ -682,12 +683,11 @@ instance
   where
   type Share (Trip coin ptr pool) = Interns pool
   fromSharedCBOR is =
-    decodeRecordNamed "Triple" (const 3) $
-      do
-        a <- fromCBOR
-        b <- fromCBOR
-        c <- fromShareCBORfunctor is
-        pure (Triple a b c)
+    decodeRecordNamed "Triple" (const 3) $ do
+      a <- fromCBOR
+      b <- fromCBOR
+      c <- fromShareCBORfunctor is
+      pure $! Triple a b c
 
 instance
   (Tbor coin, Tbor ptr, Tbor cred, ToCBOR pool, Ord ptr) =>
@@ -704,14 +704,13 @@ instance
     Share (UMap coin cred pool ptr) =
       (Interns cred, Interns pool)
   fromSharedPlusCBOR =
-    StateT
-      ( \(a, b) ->
-          decodeRecordNamed "UnifiedMap" (const 2) $ do
-            tripmap <- decodeMap (interns a <$> fromCBOR) (fromSharedCBOR b)
-            let a' = internsFromMap tripmap <> a
-            ptrmap <- decodeMap fromCBOR (interns a' <$> fromCBOR)
-            pure (UnifiedMap tripmap ptrmap, (a', b))
-      )
+    decodeRecordNamedT "UnifiedMap" (const 2) $ do
+      StateT $ \(!a, !b) -> do
+        tripmap <- decodeMap (interns a <$> fromCBOR) (fromSharedCBOR b)
+        let !a' = internsFromMap tripmap <> a
+        ptrmap <- decodeMap fromCBOR (interns a' <$> fromCBOR)
+        let !um = UnifiedMap tripmap ptrmap
+        pure (um, (a', b))
 
 -- =================================================================
 

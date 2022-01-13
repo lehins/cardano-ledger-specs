@@ -4,7 +4,6 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
@@ -28,7 +27,7 @@ module Data.Sharing
 where
 
 import Cardano.Binary (Decoder, FromCBOR (..), decodeListLen, dropMap)
-import Control.Monad (void)
+import Control.Monad (void, (<$!>))
 import Control.Monad.Trans
 import Control.Monad.Trans.State.Strict
 import Data.BiMap (BiMap (..), biMapFromMap)
@@ -126,7 +125,7 @@ class Monoid (Share a) => FromSharedCBOR a where
   -- | Utilize sharing when decoding, but do not add anything to the state for
   -- future sharing.
   fromSharedCBOR :: Share a -> Decoder s a
-  fromSharedCBOR s = fst <$> runStateT fromSharedPlusCBOR s
+  fromSharedCBOR = evalStateT fromSharedPlusCBOR
 
   -- | Deserialize with sharing and add to the state that is used for sharing. Default
   -- implementation will add value returned by `getShare` for adding to the
@@ -221,7 +220,7 @@ instance (Ord a, Ord b, FromCBOR a, FromCBOR b) => FromSharedCBOR (BiMap b a b) 
   getShare (MkBiMap m1 m2) = (internsFromMap m1, internsFromMap m2)
 
 -- | Share every item in a functor, have deserializing it
-fromShareCBORfunctor :: (FromCBOR (f b), Functor f) => Interns b -> Decoder s (f b)
+fromShareCBORfunctor :: (FromCBOR (f b), Monad f) => Interns b -> Decoder s (f b)
 fromShareCBORfunctor kis = do
   sm <- fromCBOR
-  pure (interns kis <$> sm)
+  pure $! interns kis <$!> sm
