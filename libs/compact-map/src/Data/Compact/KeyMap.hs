@@ -407,6 +407,25 @@ deleteInternal path key km continue = case3 (continue Empty) leafF arrayF km
 delete :: Key -> KeyMap v -> KeyMap v
 delete key km = deleteInternal (keyPath key) key km id
 
+-- extractInternal :: Path -> Key -> KeyMap v -> (KeyMap v -> Maybe (v, KeyMap v)) -> Maybe (v, KeyMap v)
+-- extractInternal path key km continue = case3 (continue Empty) leafF arrayF km
+--   where
+--     leafF k2 v = if key == k2 then continue Empty else continue km
+--     arrayF bmap arr =
+--       case VP.uncons path of
+--         Nothing -> continue km
+--         Just (i, is) ->
+--           let m = setBit 0 i
+--               j = sparseIndex bmap m
+--               newcontinue Empty = continue (buildKeyMap (clearBit bmap i) (remove arr j))
+--               newcontinue x = continue (buildKeyMap bmap (update arr j x))
+--            in if testBit bmap i
+--                 then deleteInternal is key (index arr j) newcontinue
+--                 else continue km
+
+-- extract :: Key -> KeyMap v -> Maybe (v, KeyMap v)
+-- extract key km = deleteInternal (keyPath key) key km id
+
 -- ==================================================================================
 -- One of the invariants is that no Empty ever appears in any of the other
 -- constructors of KeyMap.  So we make "smart" constructors that remove Empty
