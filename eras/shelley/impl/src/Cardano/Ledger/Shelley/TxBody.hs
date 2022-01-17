@@ -50,7 +50,6 @@ module Cardano.Ledger.Shelley.TxBody
       ),
     TxBodyRaw (..),
     EraIndependentTxBody,
-    -- eraIndTxBodyHash,
     TxOut (TxOut, TxOutCompact),
     Url,
     Wdrl (..),
