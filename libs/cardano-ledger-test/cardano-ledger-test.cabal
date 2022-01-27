@@ -107,6 +107,7 @@ benchmark bench
     Bench.Cardano.Ledger.EpochBoundary
     Bench.Cardano.Ledger.Serialisation.Generators
     Bench.Cardano.Ledger.SumStake
+    Bench.Cardano.Ledger.TxOut
   build-depends:
     bytestring,
     cardano-binary,
