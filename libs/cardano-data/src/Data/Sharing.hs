@@ -221,6 +221,6 @@ instance (Ord a, Ord b, FromCBOR a, FromCBOR b) => FromSharedCBOR (BiMap b a b) 
 
 -- | Share every item in a functor, have deserializing it
 fromShareCBORfunctor :: (FromCBOR (f b), Monad f) => Interns b -> Decoder s (f b)
-fromShareCBORfunctor kis = do
+fromShareCBORfunctor !kis = do
   sm <- fromCBOR
   pure $! interns kis <$!> sm

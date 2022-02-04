@@ -239,7 +239,7 @@ import Cardano.Ledger.UnifiedMap (Trip (..), Triple, UMap (..), UnifiedMap, View
 import Cardano.Ledger.Val ((<+>), (<->), (<×>))
 import qualified Cardano.Ledger.Val as Val
 import Cardano.Prelude (rightToMaybe)
-import Control.DeepSeq (NFData)
+import Control.DeepSeq
 import Control.Monad.State.Strict (evalStateT)
 import Control.Monad.Trans
 import Control.Provenance (ProvM, liftProv, modifyM)
@@ -521,7 +521,6 @@ instance (TransEpoch ToCBOR era) => ToCBOR (EpochState era) where
 instance
   ( FromCBOR (Core.PParams era),
     TransValue FromCBOR era,
-    HashAnnotated (Core.TxBody era) EraIndependentTxBody (Crypto era),
     FromSharedCBOR (Core.TxOut era),
     Share (Core.TxOut era) ~ Interns (Credential 'Staking (Crypto era)),
     FromCBOR (State (Core.EraRule "PPUP" era)),
@@ -741,7 +740,8 @@ instance
     FromSharedCBOR (Core.TxOut era),
     Share (Core.TxOut era) ~ Interns (Credential 'Staking (Crypto era)),
     FromCBOR (Core.Value era),
-    FromCBOR (State (Core.EraRule "PPUP" era))
+    FromCBOR (State (Core.EraRule "PPUP" era)),
+    TransLedgerState NFData era
   ) =>
   FromCBOR (NewEpochState era)
   where
@@ -798,7 +798,6 @@ instance
 
 instance
   ( Era era,
-    HashAnnotated (Core.TxBody era) EraIndependentTxBody (Crypto era),
     FromCBOR (Core.Value era),
     FromSharedCBOR (Core.TxOut era),
     Share (Core.TxOut era) ~ Interns (Credential 'Staking (Crypto era)),
