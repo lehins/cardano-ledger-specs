@@ -242,7 +242,7 @@ import Cardano.Ledger.Val ((<+>), (<->), (<×>))
 import qualified Cardano.Ledger.Val as Val
 import Cardano.Prelude (rightToMaybe)
 import Control.DeepSeq (NFData)
-import Control.Monad.State.Strict (StateT (..), evalStateT)
+import Control.Monad.State.Strict (evalStateT)
 import Control.Monad.Trans
 import Control.Provenance (ProvM, liftProv, modifyM)
 import Control.SetAlgebra (dom, eval, (∈), (▷), (◁))
