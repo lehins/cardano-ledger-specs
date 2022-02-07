@@ -242,7 +242,7 @@ import Cardano.Ledger.Val ((<+>), (<->), (<×>))
 import qualified Cardano.Ledger.Val as Val
 import Cardano.Prelude (rightToMaybe)
 import Control.DeepSeq (NFData)
-import Control.Monad.State.Strict (evalStateT)
+--import Control.Monad.State.Strict (evalStateT)
 import Control.Monad.Trans
 import Control.Provenance (ProvM, liftProv, modifyM)
 import Control.SetAlgebra (dom, eval, (∈), (▷), (◁))
@@ -341,8 +341,8 @@ instance CC.Crypto crypto => FromSharedCBOR (InstantaneousRewards crypto) where
   type Share (InstantaneousRewards crypto) = Interns (Credential 'Staking crypto)
   fromSharedPlusCBOR = do
     decodeRecordNamedT "InstantaneousRewards" (const 4) $ do
-      irR <- fromSharedPlusLensCBOR (toMemptyLens _1 id)
-      irT <- fromSharedPlusLensCBOR (toMemptyLens _1 id)
+      irR <- fromSharedLensCBOR (toMemptyLens _1 id)
+      irT <- fromSharedLensCBOR (toMemptyLens _1 id)
       dR <- lift fromCBOR
       dT <- lift fromCBOR
       pure $ InstantaneousRewards irR irT dR dT
@@ -394,10 +394,10 @@ instance CC.Crypto crypto => FromSharedCBOR (DState crypto) where
       (Interns (Credential 'Staking crypto), Interns (KeyHash 'StakePool crypto))
   fromSharedPlusCBOR = do
     decodeRecordNamedT "DState" (const 6) $ do
-      unified <- fromSharedPlusCBOR
+      unified <- lift fromNotSharedCBOR
       fgs <- lift fromCBOR
       gs <- lift fromCBOR
-      ir <- fromSharedPlusLensCBOR _1
+      ir <- fromSharedLensCBOR _1
       pure $ DState unified fgs gs ir
 
 -- | Current state of staking pools and their certificate counters.
@@ -424,9 +424,9 @@ instance CC.Crypto crypto => FromSharedCBOR (PState crypto) where
     Share (PState crypto) =
       Interns (KeyHash 'StakePool crypto)
   fromSharedPlusCBOR = decodeRecordNamedT "PState" (const 3) $ do
-    _pParams <- fromSharedPlusLensCBOR (toMemptyLens _1 id)
-    _fPParams <- fromSharedPlusLensCBOR (toMemptyLens _1 id)
-    _retiring <- fromSharedPlusLensCBOR (toMemptyLens _1 id)
+    _pParams <- fromSharedLensCBOR (toMemptyLens _1 id)
+    _fPParams <- fromSharedLensCBOR (toMemptyLens _1 id)
+    _retiring <- fromSharedLensCBOR (toMemptyLens _1 id)
     pure PState {_pParams, _fPParams, _retiring}
 
 -- | The state associated with the current stake delegation.
@@ -456,8 +456,8 @@ instance CC.Crypto crypto => FromSharedCBOR (DPState crypto) where
         Interns (KeyHash 'StakePool crypto)
       )
   fromSharedPlusCBOR = decodeRecordNamedT "DPState" (const 2) $ do
-    _pstate <- fromSharedPlusLensCBOR _2
-    _dstate <- fromSharedPlusCBOR
+    _pstate <- fromSharedLensCBOR _2
+    _dstate <- lift fromNotSharedCBOR
     pure DPState {_pstate, _dstate}
 
 data AccountState = AccountState
@@ -531,14 +531,14 @@ instance
   FromCBOR (EpochState era)
   where
   fromCBOR =
-    decodeRecordNamed "EpochState" (const 6) $
-      flip evalStateT mempty $ do
-        esAccountState <- lift fromCBOR
-        esLState <- fromSharedPlusCBOR
-        esSnapshots <- fromSharedPlusCBOR
-        esPrevPp <- lift fromCBOR
-        esPp <- lift fromCBOR
-        esNonMyopic <- fromSharedLensCBOR _2
+    decodeRecordNamed "EpochState" (const 6) $ do
+      --flip evalStateT mempty $ do
+        esAccountState <- fromCBOR
+        esLState <- fromNotSharedCBOR
+        esSnapshots <- fromNotSharedCBOR
+        esPrevPp <- fromCBOR
+        esPp <- fromCBOR
+        esNonMyopic <- fromNotSharedCBOR
         pure EpochState {esAccountState, esSnapshots, esLState, esPrevPp, esPp, esNonMyopic}
 
 data UpecState era = UpecState
@@ -812,7 +812,7 @@ instance
       (Interns (Credential 'Staking (Crypto era)), Interns (KeyHash 'StakePool (Crypto era)))
   fromSharedPlusCBOR =
     decodeRecordNamedT "LedgerState" (const 2) $ do
-      _delegationState <- fromSharedPlusCBOR
+      _delegationState <- lift fromNotSharedCBOR
       _utxoState <- fromSharedLensCBOR _1
       pure LedgerState {_utxoState, _delegationState}
 

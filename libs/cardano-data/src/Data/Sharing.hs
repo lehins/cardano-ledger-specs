@@ -187,19 +187,19 @@ instance (Ord k, FromCBOR k, FromCBOR v) => FromSharedCBOR (Map k v) where
   type Share (Map k v) = (Interns k, Interns v)
   fromSharedCBOR (kis, vis) = do
     decodeMap (interns kis <$> fromCBOR) (interns vis <$> fromCBOR)
-  getShare !m = (internsFromMap m, mempty)
+  getShare !_m = mempty --(internsFromMap m, mempty)
 
 instance (Ord k, FromCBOR k, FromCBOR v) => FromSharedCBOR (VMap VB VB k v) where
   type Share (VMap VB VB k v) = (Interns k, Interns v)
   fromSharedCBOR (kis, vis) = do
     decodeVMap (interns kis <$> fromCBOR) (interns vis <$> fromCBOR)
-  getShare !m = (internsFromVMap m, mempty)
+  getShare !_m = mempty --(internsFromVMap m, mempty)
 
 instance (Ord k, FromCBOR k, FromCBOR v, Prim v) => FromSharedCBOR (VMap VB VP k v) where
   type Share (VMap VB VP k v) = Interns k
   fromSharedCBOR kis = do
     decodeVMap (interns kis <$> fromCBOR) fromCBOR
-  getShare !m = internsFromVMap m
+  getShare !_m = mempty --internsFromVMap m
 
 -- ==============================================================================
 -- These BiMap instances are adapted from the FromCBOR instances in Data.Coders

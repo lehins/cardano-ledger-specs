@@ -134,8 +134,8 @@ instance
   type
     Share (UTxO era) =
       Interns (Credential 'Staking (Crypto era))
-  fromSharedCBOR credsInterns =
-    UTxO <$!> decodeSplitMap fromCBOR (fromSharedCBOR credsInterns)
+  fromSharedCBOR _credsInterns =
+    UTxO <$!> decodeSplitMap fromCBOR (fromSharedCBOR mempty)
 
 deriving via
   Quiet (UTxO era)

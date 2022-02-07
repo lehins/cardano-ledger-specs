@@ -116,7 +116,7 @@ import Cardano.Ledger.Val
     isZero,
   )
 import Control.DeepSeq (NFData (..), rwhnf)
-import Control.Monad (guard, (<$!>))
+import Control.Monad (guard) --, (<$!>))
 import Data.Bits
 import Data.Coders
 import Data.Maybe (fromMaybe)
@@ -652,15 +652,15 @@ instance
   FromSharedCBOR (TxOut era)
   where
   type Share (TxOut era) = Interns (Credential 'Staking (Crypto era))
-  fromSharedCBOR credsInterns = do
+  fromSharedCBOR _credsInterns = do
     lenOrIndef <- decodeListLenOrIndef
-    let internTxOut = \case
-          TxOut_AddrHash28_AdaOnly cred a b c d ada ->
-            TxOut_AddrHash28_AdaOnly (interns credsInterns cred) a b c d ada
-          TxOut_AddrHash28_AdaOnly_DataHash32 cred a b c d ada e f g h ->
-            TxOut_AddrHash28_AdaOnly_DataHash32 (interns credsInterns cred) a b c d ada e f g h
-          txOut -> txOut
-    internTxOut <$!> case lenOrIndef of
+    -- let internTxOut = \case
+    --       TxOut_AddrHash28_AdaOnly cred a b c d ada ->
+    --         TxOut_AddrHash28_AdaOnly (interns credsInterns cred) a b c d ada
+    --       TxOut_AddrHash28_AdaOnly_DataHash32 cred a b c d ada e f g h ->
+    --         TxOut_AddrHash28_AdaOnly_DataHash32 (interns credsInterns cred) a b c d ada e f g h
+    --       txOut -> txOut
+    case lenOrIndef of
       Nothing -> do
         a <- fromCBOR
         cv <- decodeNonNegative

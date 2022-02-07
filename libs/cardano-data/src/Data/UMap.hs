@@ -631,12 +631,12 @@ instance
   FromSharedCBOR (Trip coin ptr pool)
   where
   type Share (Trip coin ptr pool) = Interns pool
-  fromSharedCBOR is =
+  fromSharedCBOR _is =
     decodeRecordNamed "Triple" (const 3) $
       do
         a <- fromCBOR
         b <- fromCBOR
-        c <- fromShareCBORfunctor is
+        c <- fromCBOR
         pure (Triple a b c)
 
 instance
@@ -658,9 +658,9 @@ instance
       ( \(a, b) ->
           decodeRecordNamed "UnifiedMap" (const 2) $ do
             tripmap <- decodeMap (interns a <$> fromCBOR) (fromSharedCBOR b)
-            let a' = internsFromMap tripmap <> a
-            ptrmap <- decodeMap fromCBOR (interns a' <$> fromCBOR)
-            pure (UnifiedMap tripmap ptrmap, (a', b))
+            --let a' = internsFromMap tripmap <> a
+            ptrmap <- decodeMap fromCBOR (interns a <$> fromCBOR)
+            pure (UnifiedMap tripmap ptrmap, (a, b))
       )
 
 -- =================================================================
