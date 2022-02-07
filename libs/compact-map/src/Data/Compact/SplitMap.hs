@@ -133,7 +133,7 @@ insertWithKey combine k v (SplitMap imap) =
 insertWithKey combine k v (SplitMap imap) =
   SplitMap (IntMap.insertWith combine2 n (KeyMap.insert key v KeyMap.Empty) imap)
   where
-    (n, key) = splitKey k
+    !(!n, !key) = splitKey k
     combine2 :: KeyMap v -> KeyMap v -> KeyMap v
     combine2 _km1 km2 = KeyMap.insertWith @v (combine k) key v km2
 
@@ -502,7 +502,7 @@ splitLookup k (SplitMap imap) =
 fromList :: Split k => [(k, v)] -> SplitMap k v
 fromList = F.foldl' accum empty
   where
-    accum mp (k, v) = insert k v mp
+    accum !mp (!k, !v) = insert k v mp
 
 -- | Generates the list in ascending order of k
 toList :: SplitMap k v -> [(k, v)]
