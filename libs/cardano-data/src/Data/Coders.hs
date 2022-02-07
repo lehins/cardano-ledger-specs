@@ -324,7 +324,12 @@ wrapCBORArray len contents =
 -- Era, which are not always cannonical. We want to make these
 -- cannonical improvements easy to use.
 
-encodeSplitMap :: (k -> Encoding) -> (v -> Encoding) -> SplitMap.SplitMap k v -> Encoding
+encodeSplitMap ::
+     SplitMap.Split k
+  => (k -> Encoding)
+  -> (v -> Encoding)
+  -> SplitMap.SplitMap k v
+  -> Encoding
 encodeSplitMap encodeKey encodeValue m =
   let l = fromIntegral $ SplitMap.size m
       contents = SplitMap.foldrWithKey' (\k v acc -> encodeKey k <> encodeValue v <> acc) mempty m
