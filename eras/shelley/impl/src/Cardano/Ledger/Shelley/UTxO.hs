@@ -108,7 +108,7 @@ import Quiet
 
 -- | The unspent transaction outputs.
 newtype UTxO era = UTxO {unUTxO :: SplitMap.SplitMap (TxIn (Crypto era)) (Core.TxOut era)}
-  deriving (Generic, Semigroup)
+  deriving (Generic)
 
 type TransUTxO (c :: Type -> Constraint) era = (c (Core.TxOut era), TransTxId c era)
 
@@ -118,6 +118,8 @@ deriving instance (Era era, NFData (Core.TxOut era)) => NFData (UTxO era)
 
 deriving newtype instance
   (Eq (Core.TxOut era), CC.Crypto (Crypto era)) => Eq (UTxO era)
+
+deriving newtype instance CC.Crypto (Crypto era) => Semigroup (UTxO era)
 
 deriving newtype instance CC.Crypto (Crypto era) => Monoid (UTxO era)
 
@@ -174,6 +176,7 @@ txouts tx =
 
 -- | Lookup a txin for a given UTxO collection
 txinLookup ::
+  CC.Crypto (Crypto era) =>
   TxIn (Crypto era) ->
   UTxO era ->
   Maybe (Core.TxOut era)
@@ -334,7 +337,7 @@ scriptsNeeded u tx =
 -- | Compute the subset of inputs of the set 'txInps' for which each input is
 -- locked by a script in the UTxO 'u'.
 txinsScriptHashes ::
-  (HasField "address" (Core.TxOut era) (Addr (Crypto era))) =>
+  (HasField "address" (Core.TxOut era) (Addr (Crypto era)), CC.Crypto (Crypto era)) =>
   Set (TxIn (Crypto era)) ->
   UTxO era ->
   Set (ScriptHash (Crypto era))
