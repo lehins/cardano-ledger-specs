@@ -60,7 +60,7 @@ import Cardano.Ledger.Credential
   )
 import Cardano.Ledger.Crypto (Crypto)
 import Cardano.Ledger.Era (Era)
-import qualified Cardano.Ledger.Era as Era (TxSeq)
+import qualified Cardano.Ledger.Era as Era (TxSeq, Crypto)
 import Cardano.Ledger.Keys
   ( GKeys (..),
     GenDelegPair (..),
@@ -378,7 +378,7 @@ ppAssocList name kf vf xs =
           vertical
           (name <> encloseSep (lbrace <> space) (space <> rbrace) (comma <> space) docs)
 
-ppSplitMap :: (k -> PDoc) -> (v -> PDoc) -> SplitMap.SplitMap k v -> PDoc
+ppSplitMap :: SplitMap.Split k => (k -> PDoc) -> (v -> PDoc) -> SplitMap.SplitMap k v -> PDoc
 ppSplitMap kf vf = ppAssocList (text "SplitMap") kf vf . SplitMap.toList
 
 ppMap' :: PDoc -> (k -> PDoc) -> (v -> PDoc) -> Map.Map k v -> PDoc
@@ -610,7 +610,8 @@ instance PrettyA (RewardUpdate crypto) where
 type CanPrettyPrintLedgerState era =
   ( PrettyA (Core.TxOut era),
     PrettyA (Core.PParams era),
-    PrettyA (State (Core.EraRule "PPUP" era))
+    PrettyA (State (Core.EraRule "PPUP" era)),
+    Crypto (Era.Crypto era)
   )
 
 ppAccountState :: AccountState -> PDoc
@@ -895,13 +896,13 @@ instance PrettyA (SnapShots crypto) where
 -- Cardano.Ledger.Shelley.UTxO
 
 ppUTxO ::
-  PrettyA (Core.TxOut era) =>
+  (PrettyA (Core.TxOut era), Crypto (Era.Crypto era)) =>
   UTxO era ->
   PDoc
 ppUTxO = ppAssocList (text "UTxO") ppTxIn prettyA . SplitMap.toList . unUTxO
 
 instance
-  PrettyA (Core.TxOut era) =>
+  (PrettyA (Core.TxOut era), Crypto (Era.Crypto era)) =>
   PrettyA (UTxO era)
   where
   prettyA = ppUTxO

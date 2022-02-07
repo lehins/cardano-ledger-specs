@@ -168,6 +168,7 @@ getFilteredUTxO ss addrSet =
         Right cAddr -> cAddr `Set.member` compactAddrSet
 
 getUTxOSubset ::
+  CC.Crypto (Crypto era) =>
   NewEpochState era ->
   Set (TxIn (Crypto era)) ->
   UTxO era

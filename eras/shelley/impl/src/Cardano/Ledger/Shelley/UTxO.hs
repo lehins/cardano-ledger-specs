@@ -108,7 +108,7 @@ import Quiet
 
 -- | The unspent transaction outputs.
 newtype UTxO era = UTxO {unUTxO :: SplitMap.SplitMap (TxIn (Crypto era)) (Core.TxOut era)}
-  deriving (Generic, Semigroup)
+  deriving (Generic)
 
 type TransUTxO (c :: Type -> Constraint) era = (c (Core.TxOut era), TransTxId c era)
 
@@ -118,6 +118,8 @@ deriving instance (Era era, NFData (Core.TxOut era)) => NFData (UTxO era)
 
 deriving newtype instance
   (Eq (Core.TxOut era), CC.Crypto (Crypto era)) => Eq (UTxO era)
+
+deriving newtype instance CC.Crypto (Crypto era) => Semigroup (UTxO era)
 
 deriving newtype instance CC.Crypto (Crypto era) => Monoid (UTxO era)
 
@@ -176,6 +178,7 @@ txouts txBody =
 
 -- | Lookup a txin for a given UTxO collection
 txinLookup ::
+  CC.Crypto (Crypto era) =>
   TxIn (Crypto era) ->
   UTxO era ->
   Maybe (Core.TxOut era)

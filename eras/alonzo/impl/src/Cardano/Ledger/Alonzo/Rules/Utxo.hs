@@ -417,7 +417,8 @@ validateOutputTooSmallUTxO pp (UTxO outputs) =
 validateOutputTooBigUTxO ::
   ( HasField "_maxValSize" (Core.PParams era) Natural,
     HasField "value" (Core.TxOut era) (Core.Value era),
-    ToCBOR (Core.Value era)
+    ToCBOR (Core.Value era),
+    CC.Crypto (Crypto era)
   ) =>
   Core.PParams era ->
   UTxO era ->
