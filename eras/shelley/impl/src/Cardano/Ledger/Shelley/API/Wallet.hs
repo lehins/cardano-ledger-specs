@@ -153,7 +153,7 @@ getUTxO = _utxo . _utxoState . esLState . nesEs
 
 -- | Get the UTxO filtered by address.
 getFilteredUTxO ::
-  (HasField "compactAddress" (Core.TxOut era) (CompactAddr (Crypto era)), CC.Crypto (Crypto era)) =>
+  (HasField "compactAddress" (Core.TxOut era) (CompactAddr (Crypto era))) =>
   NewEpochState era ->
   Set (Addr (Crypto era)) ->
   UTxO era
@@ -169,7 +169,6 @@ getFilteredUTxO ss addrs =
     addrSBSs = Set.map compactAddr addrs
 
 getUTxOSubset ::
-  CC.Crypto (Crypto era) =>
   NewEpochState era ->
   Set (TxIn (Crypto era)) ->
   UTxO era

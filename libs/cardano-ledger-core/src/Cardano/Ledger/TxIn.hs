@@ -42,7 +42,7 @@ import Cardano.Prelude (HeapWords (..), NFData, cborError)
 import qualified Cardano.Prelude as HW
 import Control.Monad (when)
 import Data.Compact.HashMap (Keyed (..))
-import Data.Compact.SplitMap as SMap
+--import Data.Compact.SplitMap as SMap
 import Data.Text as T (pack)
 import Data.Word (Word64)
 import GHC.Generics (Generic)
@@ -88,9 +88,9 @@ instance CC.Crypto crypto => HeapWords (TxIn crypto) where
 data TxIn crypto = TxInCompact !(TxId crypto) {-# UNPACK #-} !Int
   deriving (Generic)
 
-instance CC.Crypto crypto => Split (TxIn crypto) where
-  splitKey (TxInCompact txId txIx) = (txIx, toKey txId)
-  joinKey txIx key = TxInCompact (fromKey key) txIx
+-- instance CC.Crypto crypto => Split (TxIn crypto) where
+--   splitKey (TxInCompact txId txIx) = (txIx, toKey txId)
+--   joinKey txIx key = TxInCompact (fromKey key) txIx
 
 pattern TxIn ::
   TxId crypto ->

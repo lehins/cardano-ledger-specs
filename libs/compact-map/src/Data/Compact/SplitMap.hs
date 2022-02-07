@@ -1,12 +1,46 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Data.Compact.SplitMap where
+module Data.Compact.SplitMap
+  ( SplitMap,
+    Split,
+    module Map,
+    extractKeysSet,
+    restrictKeysSet,
+    (◁),
+  )
+where
 
+import Data.Map.Strict as Map
+import qualified Data.Set as Set
+
+type SplitMap = Map
+
+type Split = Ord
+
+(◁) :: Split k => Set.Set k -> SplitMap k a -> SplitMap k a
+(◁) = flip restrictKeysSet
+
+restrictKeysSet :: forall k a. Split k => SplitMap k a -> Set.Set k -> SplitMap k a
+restrictKeysSet = Map.restrictKeys
+
+extractKeysSet :: forall k a. Split k => SplitMap k a -> Set.Set k -> (SplitMap k a, SplitMap k a)
+extractKeysSet sm = Set.foldl' f (sm, empty)
+  where
+    f acc@(without, restrict) k =
+      case Map.lookup k without of
+        Nothing -> acc
+        Just v ->
+          let !without' = delete k without
+              !restrict' = insert k v restrict
+           in (without', restrict')
+
+{-
 import Control.DeepSeq
 import Data.Compact.KeyMap (Key (..), KeyMap, PDoc, ppKeyMap, ppList, ppSexp)
 import qualified Data.Compact.KeyMap as KeyMap
@@ -120,14 +154,14 @@ size (SplitMap imap) = IntMap.foldl' (\acc km -> acc + KeyMap.size km) 0 imap
 -- Insert and delete operations
 
 insertWithKey :: forall k v. Split k => (k -> v -> v -> v) -> k -> v -> SplitMap k v -> SplitMap k v
-{- Maybe we should benchmark these two
-insertWithKey combine k v (SplitMap imap) =
-  SplitMap (IntMap.insertWith combine2 n (KeyMap.insert key v KeyMap.Empty) imap)
- where
-    (n, key) = splitKey k
-    combine2 :: KeyMap v -> KeyMap v -> KeyMap v
-    combine2 km1 km2 = KeyMap.unionWith (combine k) km1 km2
--}
+-- -- Maybe we should benchmark these two
+-- insertWithKey combine k v (SplitMap imap) =
+--   SplitMap (IntMap.insertWith combine2 n (KeyMap.insert key v KeyMap.Empty) imap)
+--  where
+--     (n, key) = splitKey k
+--     combine2 :: KeyMap v -> KeyMap v -> KeyMap v
+--     combine2 km1 km2 = KeyMap.unionWith (combine k) km1 km2
+
 insertWithKey combine k v (SplitMap imap) =
   SplitMap (IntMap.insertWith combine2 n (KeyMap.insert key v KeyMap.Empty) imap)
   where
@@ -571,3 +605,4 @@ ppSplitMap (SplitMap imap) = ppList ppitem (IntMap.toList imap)
     ppitem (n, kmap) = ppSexp (pack "Split") [viaShow n, ppKeyMap viaShow ppv kmap]
     ppv :: v -> PDoc
     ppv x = viaShow x
+-}

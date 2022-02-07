@@ -176,7 +176,6 @@ txouts tx =
 
 -- | Lookup a txin for a given UTxO collection
 txinLookup ::
-  CC.Crypto (Crypto era) =>
   TxIn (Crypto era) ->
   UTxO era ->
   Maybe (Core.TxOut era)
@@ -337,7 +336,7 @@ scriptsNeeded u tx =
 -- | Compute the subset of inputs of the set 'txInps' for which each input is
 -- locked by a script in the UTxO 'u'.
 txinsScriptHashes ::
-  (HasField "address" (Core.TxOut era) (Addr (Crypto era)), CC.Crypto (Crypto era)) =>
+  (HasField "address" (Core.TxOut era) (Addr (Crypto era))) =>
   Set (TxIn (Crypto era)) ->
   UTxO era ->
   Set (ScriptHash (Crypto era))
