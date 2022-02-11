@@ -39,6 +39,8 @@ library
     Cardano.Ledger.Babbage.Tx
     Cardano.Ledger.Babbage.TxBody
     Cardano.Ledger.Babbage.Translation
+    Cardano.Ledger.Babbage.Rules.Utxo
+    Cardano.Ledger.Babbage.Collateral
     Cardano.Ledger.Babbage
   build-depends:
     array,

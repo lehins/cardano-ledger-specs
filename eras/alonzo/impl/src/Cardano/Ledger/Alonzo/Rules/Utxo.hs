@@ -236,6 +236,8 @@ fromShelleyFailure = \case
   Shelley.UpdateFailure {} -> Nothing -- Removed
   Shelley.OutputBootAddrAttrsTooBig outs -> Just $ OutputBootAddrAttrsTooBig outs
 
+toAlonzoFromShelleyValidation = mapValidationMaybe Alonzo.fromShelleyFailure
+
 fromShelleyMAFailure :: ShelleyMA.UtxoPredicateFailure era -> Maybe (UtxoPredicateFailure era)
 fromShelleyMAFailure = \case
   ShelleyMA.BadInputsUTxO {} -> Nothing -- Inherited from Shelley
@@ -251,6 +253,8 @@ fromShelleyMAFailure = \case
   ShelleyMA.OutputBootAddrAttrsTooBig {} -> Nothing -- Inherited from Shelley
   ShelleyMA.TriesToForgeADA -> Just TriesToForgeADA
   ShelleyMA.OutputTooBigUTxO {} -> Nothing -- Updated error reporting
+
+toAlonzoFromShelleyMAValidation = mapValidationMaybe Alonzo.fromShelleyMAFailure
 
 -- | Returns true for VKey locked addresses, and false for any kind of
 -- script-locked address.
@@ -537,8 +541,9 @@ utxoTransition = do
           (getField @"collateral" txb)
 
   {- ininterval slot (txvld txb) -}
-  runValidationTransMaybe fromShelleyMAFailure $
-    ShelleyMA.validateOutsideValidityIntervalUTxO slot txb
+  runValidation $
+    toAlonzoFromShelleyMAValidation $
+      ShelleyMA.validateOutsideValidityIntervalUTxO slot txb
 
   sysSt <- liftSTS $ asks systemStart
   ei <- liftSTS $ asks epochInfoWithErr
@@ -547,7 +552,7 @@ utxoTransition = do
   runValidation $ validateOutsideForecast ei sysSt tx
 
   {-   txins txb ≠ ∅   -}
-  runValidationStaticTransMaybe fromShelleyFailure $ Shelley.validateInputSetEmptyUTxO txb
+  runValidationStatic $ toAlonzoFromShelleyValidation $ Shelley.validateInputSetEmptyUTxO txb
 
   {-   feesOK pp tx utxo   -}
   runValidation $ feesOK pp tx utxo -- Generalizes the fee to small from earlier Era's
