@@ -53,7 +53,6 @@ import Cardano.Ledger.BaseTypes
   )
 import Cardano.Ledger.Coin (Coin (..))
 import qualified Cardano.Ledger.Core as Core
-import qualified Cardano.Ledger.Crypto as CC (Crypto)
 import Cardano.Ledger.Era (Era (..), getTxOutBootstrapAddress)
 import Cardano.Ledger.Keys (GenDelegs, KeyHash, KeyRole (..))
 import Cardano.Ledger.Rules.ValidationMode (runValidation)
@@ -473,7 +472,6 @@ validateFeeTooSmallUTxO pp tx =
 --
 -- > inputs ⊆ dom utxo
 validateBadInputsUTxO ::
-  CC.Crypto (Crypto era) =>
   UTxO era ->
   Set (TxIn (Crypto era)) ->
   Validation (NonEmpty (UtxoPredicateFailure era)) ()
@@ -545,8 +543,7 @@ validateValueNotConservedUTxO pp utxo stakepools txb =
 -- > ∀(_ → (_, c)) ∈ txouts txb, c ≥ (minUTxOValue pp)
 validateOutputTooSmallUTxO ::
   ( HasField "_minUTxOValue" (Core.PParams era) Coin,
-    HasField "value" (Core.TxOut era) Coin,
-    CC.Crypto (Crypto era)
+    HasField "value" (Core.TxOut era) Coin
   ) =>
   Core.PParams era ->
   UTxO era ->

@@ -92,8 +92,7 @@ import NoThunks.Class (NoThunks)
 getData ::
   forall era tx.
   ( HasField "datahash" (Core.TxOut era) (StrictMaybe (DataHash (Crypto era))),
-    HasField "wits" tx (TxWitness era),
-    CC.Crypto (Crypto era)
+    HasField "wits" tx (TxWitness era)
   ) =>
   tx ->
   UTxO era ->

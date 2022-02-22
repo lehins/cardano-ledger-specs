@@ -664,7 +664,7 @@ genIndices k (l', u')
 -- NOTE: we can't use the same approach as we do for `Map.Map` in
 -- `pickRandomFromMap`, because `SplitMap.SplitMap` does not implement integer
 -- indexing (a.k.a. elemAt).
-pickRandomFromSplitMap :: SplitMap.Split a => Int -> SplitMap.SplitMap a b -> Gen [(a, b)]
+pickRandomFromSplitMap :: Int -> SplitMap.SplitMap a b -> Gen [(a, b)]
 pickRandomFromSplitMap n sp = do
   (_, ixs) <- genIndices (min (max 0 n) sz) (0, sz - 1)
   case SplitMap.foldrWithKey' pickFromIndex ([], 0, IntSet.toAscList ixs) sp of

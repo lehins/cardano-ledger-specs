@@ -23,7 +23,6 @@ import Cardano.Ledger.BaseTypes
   )
 import Cardano.Ledger.Coin
 import qualified Cardano.Ledger.Core as Core
-import qualified Cardano.Ledger.Crypto as CC
 import Cardano.Ledger.Era (Era (..))
 import Cardano.Ledger.Keys (KeyHash, KeyRole (..))
 import Cardano.Ledger.Rules.ValidationMode (runValidation, runValidationTransMaybe)
@@ -323,8 +322,7 @@ validateTriesToForgeADA txb =
 -- > ∀ txout ∈ txouts txb, serSize (getValue txout) ≤ MaxValSize
 validateOutputTooBigUTxO ::
   ( HasField "value" (Core.TxOut era) (Core.Value era),
-    ToCBOR (Core.Value era),
-    CC.Crypto (Crypto era)
+    ToCBOR (Core.Value era)
   ) =>
   UTxO era ->
   Validation (NonEmpty (UtxoPredicateFailure era)) ()
@@ -346,8 +344,7 @@ validateOutputTooBigUTxO (UTxO outputs) =
 validateOutputTooSmallUTxO ::
   ( HasField "_minUTxOValue" (Core.PParams era) Coin,
     HasField "value" (Core.TxOut era) (Core.Value era),
-    Val.Val (Core.Value era),
-    CC.Crypto (Crypto era)
+    Val.Val (Core.Value era)
   ) =>
   Core.PParams era ->
   UTxO era ->

@@ -89,7 +89,6 @@ note _ (Just x) = Right x
 note e Nothing = Left e
 
 basicValidation ::
-  CC.Crypto c =>
   -- | The transaction.
   Core.Tx (AlonzoEra c) ->
   -- | The current UTxO set (or the relevant portion for the transaction).

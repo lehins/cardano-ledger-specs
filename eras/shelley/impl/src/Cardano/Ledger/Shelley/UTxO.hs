@@ -178,7 +178,6 @@ txouts txBody =
 
 -- | Lookup a txin for a given UTxO collection
 txinLookup ::
-  CC.Crypto (Crypto era) =>
   TxIn (Crypto era) ->
   UTxO era ->
   Maybe (Core.TxOut era)

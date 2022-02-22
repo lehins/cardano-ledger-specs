@@ -305,8 +305,7 @@ wrapCBORArray len contents =
 -- cannonical improvements easy to use.
 
 encodeSplitMap ::
-     SplitMap.Split k
-  => (k -> Encoding)
+     (k -> Encoding)
   -> (v -> Encoding)
   -> SplitMap.SplitMap k v
   -> Encoding
