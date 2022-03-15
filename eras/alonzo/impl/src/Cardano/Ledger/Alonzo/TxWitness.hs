@@ -48,17 +48,21 @@ import Cardano.Binary
     encodeListLen,
     serializeEncoding',
   )
+import Cardano.Crypto.DSIGN.Class (VerKeyDSIGN)
 import Cardano.Ledger.Alonzo.Data (Data, DataHash, hashData)
 import Cardano.Ledger.Alonzo.Language (Language (..))
 import Cardano.Ledger.Alonzo.Scripts (ExUnits (..), Script (..), Tag)
 import qualified Cardano.Ledger.Core as Core
+import qualified Cardano.Ledger.Crypto as CC
 import Cardano.Ledger.Era (Era (Crypto), ValidateScript, hashScript)
+import Cardano.Ledger.Hashes (EraIndependentTxBody)
 import Cardano.Ledger.Keys
 import Cardano.Ledger.SafeHash (SafeToHash (..))
 import Cardano.Ledger.Serialization (FromCBORGroup (..), ToCBORGroup (..))
 import Cardano.Ledger.Shelley.Address.Bootstrap (BootstrapWitness)
 import Cardano.Ledger.Shelley.Scripts (ScriptHash)
 import Cardano.Ledger.Shelley.TxBody (WitVKey)
+import Control.DeepSeq
 import qualified Data.ByteString.Short as SBS
 import Data.Coders
 import Data.Map.Strict (Map)
@@ -172,6 +176,17 @@ data TxWitnessRaw era = TxWitnessRaw
   }
   deriving (Generic, Typeable)
 
+instance
+  ( Era era,
+    Core.Script era ~ Script era,
+    crypto ~ Crypto era,
+    NFData (TxDats era),
+    NFData (Redeemers era),
+    NFData (SignedDSIGN crypto (Hash crypto EraIndependentTxBody)),
+    NFData (VerKeyDSIGN (CC.DSIGN crypto))
+  ) =>
+  NFData (TxWitnessRaw era)
+
 newtype TxWitness era = TxWitnessConstr (MemoBytes (TxWitnessRaw era))
   deriving newtype (SafeToHash, ToCBOR)
 
@@ -185,6 +200,17 @@ instance (Era era, Core.Script era ~ Script era) => Semigroup (TxWitness era) wh
 
 instance (Era era, Core.Script era ~ Script era) => Monoid (TxWitness era) where
   mempty = TxWitness mempty mempty mempty mempty (Redeemers mempty)
+
+deriving instance
+  ( Era era,
+    Core.Script era ~ Script era,
+    crypto ~ Crypto era,
+    NFData (TxDats era),
+    NFData (Redeemers era),
+    NFData (SignedDSIGN crypto (Hash crypto EraIndependentTxBody)),
+    NFData (VerKeyDSIGN (CC.DSIGN crypto))
+  ) =>
+  NFData (TxWitness era)
 
 isEmptyTxWitness :: TxWitness era -> Bool
 isEmptyTxWitness (TxWitnessConstr (Memo (TxWitnessRaw a b c d (Redeemers' e)) _)) =

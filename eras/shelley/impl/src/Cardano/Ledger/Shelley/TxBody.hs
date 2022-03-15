@@ -66,6 +66,7 @@ module Cardano.Ledger.Shelley.TxBody
   )
 where
 
+import Cardano.Crypto.DSIGN.Class (VerKeyDSIGN)
 import Cardano.Binary
   ( Annotator (..),
     Case (..),
@@ -842,6 +843,13 @@ data WitVKey kr crypto = WitVKey'
 deriving instance CC.Crypto crypto => Show (WitVKey kr crypto)
 
 deriving instance CC.Crypto crypto => Eq (WitVKey kr crypto)
+
+instance
+  ( NFData (SignedDSIGN crypto (Hash crypto EraIndependentTxBody)),
+    NFData (VerKeyDSIGN (CC.DSIGN crypto)),
+    CC.Crypto crypto
+  ) =>
+  NFData (WitVKey kr crypto)
 
 deriving via
   (AllowThunksIn '["wvkBytes"] (WitVKey kr crypto))

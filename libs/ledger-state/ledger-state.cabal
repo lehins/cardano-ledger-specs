@@ -98,8 +98,15 @@ benchmark performance
   main-is:          Performance.hs
   build-depends:
     base,
+    aeson,
+    bytestring,
+    base16-bytestring,
+    cardano-binary,
+    cardano-ledger-alonzo,
+    cardano-slotting,
     containers,
     criterion,
+    data-default-class,
     deepseq,
     cardano-ledger-core,
     cardano-ledger-shelley,
