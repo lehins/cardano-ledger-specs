@@ -86,7 +86,7 @@ data ScriptFailure c
     IncompatibleBudget PV1.ExBudget
   | -- | There was no cost model for a given version of Plutus
     NoCostModel Language
-  | -- | There was a corruptp cost model for a given version of Plutus
+  | -- | There was a corrupt cost model for a given version of Plutus
     CorruptCostModel Language
   deriving (Show)
 
