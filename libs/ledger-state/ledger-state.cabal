@@ -106,6 +106,7 @@ benchmark performance
     cardano-slotting,
     containers,
     criterion,
+    compact-map,
     data-default-class,
     cardano-ledger-core,
     cardano-ledger-shelley,

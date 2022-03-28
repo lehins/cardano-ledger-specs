@@ -11,6 +11,7 @@ import Cardano.Ledger.Alonzo.PParams
 import Cardano.Ledger.BaseTypes
 import Cardano.Ledger.CompactAddress
 import qualified Cardano.Ledger.Core as Core
+import qualified Cardano.Ledger.Crypto as CC
 import Cardano.Ledger.Era
 import Cardano.Ledger.Shelley.API.Mempool
 import Cardano.Ledger.Shelley.API.Wallet (getFilteredUTxO, getUTxO)
@@ -18,6 +19,7 @@ import Cardano.Ledger.Shelley.Genesis (ShelleyGenesis (..), mkShelleyGlobals)
 import Cardano.Ledger.Shelley.LedgerState
 import Cardano.Ledger.Shelley.UTxO (UTxO (..))
 import Cardano.Ledger.State.UTxO
+import Cardano.Ledger.TxIn
 import Cardano.Slotting.EpochInfo (fixedEpochInfo)
 import Cardano.Slotting.Slot
 import Cardano.Slotting.Time (mkSlotLength)
@@ -26,11 +28,20 @@ import Data.Aeson
 import Data.Bifunctor (first)
 import Data.ByteString.Base16.Lazy as BSL16
 import Data.ByteString.Lazy (ByteString)
+import Data.Compact.HashMap (Keyed (..))
+import Data.Compact.SplitMapOriginal as SplitMap
 import Data.Default.Class (def)
 import Data.Foldable as F
 import Data.Map.Strict as Map
 import Data.Set as Set
 import System.Environment (getEnv)
+
+-- This instance might be useful again if we can get SplitMap to perform well.
+instance CC.Crypto crypto => SplitMap.Split (TxIn crypto) where
+  splitKey (TxIn txId txIx) = (txIxToInt txIx, toKey txId)
+  joinKey txIx key =
+    -- `fromIntegral` is safe here, since we have only valid values in the SplitMap:
+    TxIn (fromKey key) (TxIx (fromIntegral txIx))
 
 main :: IO ()
 main = do
@@ -58,6 +69,8 @@ main = do
   putStrLn $ "Importing NewEpochState from: " ++ show ledgerStateFilePath
   es <- readNewEpochState ledgerStateFilePath
   putStrLn "Done importing NewEpochState"
+  let utxo = unUTxO $ getUTxO es
+      utxosm = SplitMap.fromMap utxo
   defaultMain
     [ env (pure ((mkMempoolEnv es slotNo, toMempoolState es))) $ \ ~(mempoolEnv, mempoolState) ->
         bgroup
@@ -83,9 +96,8 @@ main = do
               bench "Tx3" . whnf (applyTx' mempoolEnv mempoolState)
           ],
       env (pure es) $ \newEpochState ->
-        let utxo = getUTxO newEpochState
-            (_, minTxOut) = Map.findMin $ unUTxO utxo
-            (_, maxTxOut) = Map.findMax $ unUTxO utxo
+        let (_, minTxOut) = Map.findMin utxo
+            (_, maxTxOut) = Map.findMax utxo
             setAddr =
               Set.fromList [getTxOutAddr minTxOut, getTxOutAddr maxTxOut]
          in bgroup "MinMaxTxId" $
@@ -93,7 +105,15 @@ main = do
                   bench "getFilteredNewUTxO" . nf (getFilteredUTxO newEpochState),
                 env (pure setAddr) $
                   bench "getFilteredOldUTxO" . nf (getFilteredOldUTxO newEpochState)
+              ],
+      bgroup
+        "UTxO"
+        [ env (pure (utxo, utxosm)) $ \ ~(m, sm) ->
+            bgroup "toList" $
+              [ bench "Map" $ nf Map.toList m,
+                bench "SplitMap" $ nf SplitMap.toList sm
               ]
+        ]
     ]
 
 decodeTx :: ByteString -> Core.Tx CurrentEra

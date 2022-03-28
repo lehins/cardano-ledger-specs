@@ -34,6 +34,7 @@ library
                      , Data.Compact.VMap
                      , Data.Compact.SmallArray
                      , Data.Compact.SplitMap
+                     , Data.Compact.SplitMapOriginal
   other-modules:       Data.Compact.KVVector
   build-depends:       base >=4.11 && <5
                      , bytestring
