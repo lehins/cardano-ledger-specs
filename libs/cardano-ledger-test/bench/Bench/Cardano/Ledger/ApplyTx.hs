@@ -40,7 +40,7 @@ import Cardano.Ledger.Shelley.API
 import Cardano.Ledger.Shelley.LedgerState (DPState, LedgerState (..), UTxOState)
 import Cardano.Ledger.Shelley.PParams (PParams' (..))
 import Cardano.Ledger.Slot (SlotNo (SlotNo))
-import Control.DeepSeq (NFData (..), deepseq)
+import Control.DeepSeq (NFData (..), deepseq, ($!!))
 import Control.State.Transition (State)
 import Control.State.Transition.Trace.Generator.QuickCheck (BaseEnv, HasTrace)
 import Criterion
@@ -116,14 +116,17 @@ benchWithGenState ::
     HasTrace (Core.EraRule "LEDGER" era) (GenEnv era),
     ShelleyBasedEra era,
     Default (State (Core.EraRule "PPUP" era)),
-    BaseEnv (Core.EraRule "LEDGER" era) ~ Globals
+    BaseEnv (Core.EraRule "LEDGER" era) ~ Globals,
+    NFData (State (Core.EraRule "PPUP" era)),
+    NFData (Core.TxOut era),
+    NFData (Core.Tx era)
   ) =>
   Proxy era ->
   ((LedgerState era, Core.Tx era) -> IO a) ->
   (a -> Benchmarkable) ->
   Benchmark
 benchWithGenState px prepEnv mkBench =
-  env (prepEnv $ generateForEra px benchmarkSeed) $ bench (show $ typeRep px) . mkBench
+  env (prepEnv $!! generateForEra px benchmarkSeed) $ bench (show $ typeRep px) . mkBench
 
 benchApplyTx ::
   forall era.
@@ -163,6 +166,8 @@ deserialiseTxEra ::
     Default (State (Core.EraRule "PPUP" era)),
     BaseEnv (Core.EraRule "LEDGER" era) ~ Globals,
     HasTrace (Core.EraRule "LEDGER" era) (GenEnv era),
+    NFData (State (Core.EraRule "PPUP" era)),
+    NFData (Core.TxOut era),
     NFData (Core.Tx era)
   ) =>
   Proxy era ->
