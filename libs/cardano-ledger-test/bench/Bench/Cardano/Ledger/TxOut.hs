@@ -1,3 +1,4 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -5,6 +6,7 @@
 
 module Bench.Cardano.Ledger.TxOut (benchTxOut) where
 
+import Cardano.Binary (decodeFull, serialize)
 import Cardano.Crypto.Hash.Class
 import Cardano.Ledger.Address
 import Cardano.Ledger.Alonzo (AlonzoEra)
@@ -12,12 +14,14 @@ import Cardano.Ledger.Alonzo.Data
 import Cardano.Ledger.Alonzo.TxBody
 import Cardano.Ledger.BaseTypes
 import Cardano.Ledger.Coin
+import Cardano.Ledger.Compactible
 import Cardano.Ledger.Credential
 import Cardano.Ledger.Crypto
 import Cardano.Ledger.Hashes
 import Cardano.Ledger.Keys
 import Cardano.Ledger.Mary.Value
 import Cardano.Ledger.SafeHash
+import Cardano.Ledger.Shelley.CompactAddr
 import Cardano.Ledger.Val
 import Control.DeepSeq
 import Criterion.Main
@@ -38,25 +42,72 @@ benchTxOut =
       stake = StakeRefBase (KeyHashObj stakeAddr28)
       addr :: Int -> Addr StandardCrypto
       addr n = Addr Mainnet (key n) stake
+      addrNoStaking :: Int -> Addr StandardCrypto
+      addrNoStaking n = Addr Mainnet (key n) StakeRefNull
       value :: Value StandardCrypto
       value = Value 200 (singleton (PolicyID policyId28) (singleton assName 217))
       txOutAddr :: Int -> TxOut A
-      txOutAddr n = TxOut (addr n) value SNothing
+      txOutAddr n = TxOut (addr n) value (SJust dataHash32)
       txOutAddrAdaOnly :: Int -> TxOut A
       txOutAddrAdaOnly n = TxOut (addr n) ada SNothing
+      txOutAddrAdaOnlyNoStaking :: Int -> TxOut A
+      txOutAddrAdaOnlyNoStaking n = TxOut (addrNoStaking n) ada SNothing
       txOutAddrAdaOnlyDataHash :: Int -> TxOut A
       txOutAddrAdaOnlyDataHash n = TxOut (addr n) ada (SJust dataHash32)
       count :: Int
-      count = 10000
+      count = 1000
    in bgroup
-        "TxOut (Alonzo)"
-        [ txOutAlonzoBench count "txOutAddr" txOutAddr,
-          txOutAlonzoBench count "txOutAddrAdaOnly" txOutAddrAdaOnly,
-          txOutAlonzoBench count "txOutAddrAdaOnlyDataHash" txOutAddrAdaOnlyDataHash
+        "TxOut"
+        [ bgroup
+            "construct"
+            [ constructTxOutAlonzoBench count "ValueDataHash" addr value (SJust dataHash32),
+              constructTxOutAlonzoBench count "AdaOnlyDataHash" addr ada (SJust dataHash32),
+              constructTxOutAlonzoBench count "AdaOnly" addr ada SNothing,
+              constructTxOutAlonzoBench count "AdaOnlyNoStaking" addrNoStaking ada SNothing
+            ],
+          bgroup
+            "access"
+            [ accessTxOutAlonzoBench count "ValueDataHash" txOutAddr,
+              accessTxOutAlonzoBench count "AdaOnlyDataHash" txOutAddrAdaOnlyDataHash,
+              accessTxOutAlonzoBench count "AdaOnly" txOutAddrAdaOnly,
+              accessTxOutAlonzoBench count "AdaOnlyNoStaking" txOutAddrAdaOnlyNoStaking
+            ],
+          bgroup
+            "serialize"
+            [ serializeTxOutAlonzoBench count "ValueDataHash" txOutAddr,
+              serializeTxOutAlonzoBench count "AdaOnlyDataHash" txOutAddrAdaOnlyDataHash,
+              serializeTxOutAlonzoBench count "AdaOnly" txOutAddrAdaOnly,
+              serializeTxOutAlonzoBench count "AdaOnlyNoStaking" txOutAddrAdaOnlyNoStaking
+            ]
         ]
 
-txOutAlonzoBench :: Int -> String -> (Int -> TxOut A) -> Benchmark
-txOutAlonzoBench count name mkTxOuts =
+constructTxOutAlonzoBench ::
+  Int ->
+  String ->
+  (Int -> Addr StandardCrypto) ->
+  Value StandardCrypto ->
+  StrictMaybe (DataHash StandardCrypto) ->
+  Benchmark
+constructTxOutAlonzoBench count name mkAddr value !mdh =
+  cvalue
+    `seq` bgroup
+      name
+      [ env (pure (mkAddr <$> [1 .. count])) $
+          bench "TxOut" . nf (map (\addr -> TxOut addr value mdh :: TxOut A)),
+        env (pure (compactAddr . mkAddr <$> [1 .. count])) $
+          bench "TxOutCompact" . nf (map (\caddr -> mkTxOutCompact caddr cvalue :: TxOut A))
+      ]
+  where
+    cvalue = maybe (error "Uncompactible") id $ toCompact value
+    mkTxOutCompact ::
+      CompactAddr StandardCrypto -> CompactForm (Value StandardCrypto) -> TxOut A
+    mkTxOutCompact =
+      case mdh of
+        SNothing -> TxOutCompact
+        SJust dh -> \a v -> TxOutCompactDH a v dh
+
+accessTxOutAlonzoBench :: Int -> String -> (Int -> TxOut A) -> Benchmark
+accessTxOutAlonzoBench count name mkTxOuts =
   bgroup
     name
     [ env (pure (mkTxOuts <$> [1 .. count])) $ \txOuts ->
@@ -67,18 +118,27 @@ txOutAlonzoBench count name mkTxOuts =
           nf
             ( map
                 ( \case
-                    TxOutCompact addr vl -> addr `seq` vl
-                    TxOutCompactDH addr vl dh -> addr `seq` dh `deepseq` vl
+                    TxOutCompact addr vl -> addr `deepseq` vl
+                    TxOutCompactDH addr vl dh -> addr `deepseq` dh `deepseq` vl
                 )
             )
             txOuts,
       env (pure (mkTxOuts <$> [1 .. count])) $ \txOuts ->
-        bench "address" $
+        bench "getTxOutAddr" $
           nf
             (map (getField @"address"))
             txOuts,
       env (pure (mkTxOuts <$> [1 .. count])) $ \txOuts ->
-        bench "value" $ nf (map (getField @"value")) txOuts
+        bench "getField value" $ nf (map (getField @"value")) txOuts
+    ]
+
+serializeTxOutAlonzoBench :: Int -> String -> (Int -> TxOut A) -> Benchmark
+serializeTxOutAlonzoBench count name mkTxOuts =
+  bgroup
+    name
+    [ env (pure (mkTxOuts <$> [1 .. count])) $ bench "ToCBOR" . nf (map serialize),
+      env (pure (serialize . mkTxOuts <$> [1 .. count])) $
+        bench "FromCBOR" . nf (map (either (error . show) (id @(TxOut A)) . decodeFull))
     ]
 
 payAddr28 :: Int -> KeyHash 'Payment StandardCrypto
