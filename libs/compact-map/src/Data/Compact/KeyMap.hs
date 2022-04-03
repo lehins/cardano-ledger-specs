@@ -63,7 +63,7 @@ module Data.Compact.KeyMap
 where
 
 import Cardano.Prelude (Generic, HeapWords (..), ST, runST)
-import Control.DeepSeq (NFData (..))
+import Control.DeepSeq (NFData (..), deepseq)
 import Data.Bits
   ( Bits,
     clearBit,
@@ -155,7 +155,10 @@ data Key
       {-# UNPACK #-} !Word64
       {-# UNPACK #-} !Word64
       {-# UNPACK #-} !Word64
-  deriving (Eq, Ord, Show, NFData, Generic)
+  deriving (Eq, Ord, Show, Generic)
+
+instance NFData Key where
+  rnf Key {} = ()
 
 instance Uniform Key where
   uniformM g = do
@@ -219,7 +222,10 @@ data KeyMap v
       {-# UNPACK #-} !Bitmap -- 3 - (segmentMaxValue - 1) subtrees
       {-# UNPACK #-} !(Small.SmallArray (KeyMap v))
   | Full {-# UNPACK #-} !(Small.SmallArray (KeyMap v)) -- segmentMaxValue subtrees
-  deriving (NFData, Generic)
+  deriving Generic
+
+instance NFData v => NFData (KeyMap v) where
+  rnf = foldr deepseq ()
 
 instance NoThunks v => NoThunks (KeyMap v) where
   showTypeOf _ = "KeyMap"
@@ -505,22 +511,34 @@ size = foldWithAscKey (\ans _k _v -> ans + 1) 0
 -- ================================================================
 -- aggregation in descending order of keys
 
+-- foldWithDescKey' :: (Key -> v -> ans -> ans) -> ans -> KeyMap v -> ans
+-- foldWithDescKey' _ !ans Empty = ans
+-- foldWithDescKey' accum !ans (Leaf k v) = accum k v ans
+-- foldWithDescKey' accum !ans (One _ x) = foldWithDescKey' accum ans x
+-- foldWithDescKey' accum !ans (Two _ x y) = foldWithDescKey' accum (foldWithDescKey' accum ans y) x
+-- foldWithDescKey' accum !ans0 (BitmapIndexed _ arr) = loop ans0 (n - 1)
+--   where
+--     n = isize arr
+--     loop !ans i | i < 0 = ans
+--     loop !ans i = loop (foldWithDescKey' accum ans (index arr i)) (i - 1)
+-- foldWithDescKey' accum !ans0 (Full arr) = loop ans0 (n - 1)
+--   where
+--     n = isize arr
+--     loop !ans i | i < 0 = ans
+--     loop !ans i = loop (foldWithDescKey' accum ans (index arr i)) (i - 1)
+
 -- | Equivalent to right fold with key on a sorted key value data structure
 foldWithDescKey :: (Key -> v -> ans -> ans) -> ans -> KeyMap v -> ans
-foldWithDescKey _ !ans Empty = ans
-foldWithDescKey accum !ans (Leaf k v) = accum k v ans
-foldWithDescKey accum !ans (One _ x) = foldWithDescKey accum ans x
-foldWithDescKey accum !ans (Two _ x y) = foldWithDescKey accum (foldWithDescKey accum ans y) x
-foldWithDescKey accum !ans0 (BitmapIndexed _ arr) = loop ans0 (n - 1)
+foldWithDescKey f = go
   where
-    n = isize arr
-    loop !ans i | i < 0 = ans
-    loop !ans i = loop (foldWithDescKey accum ans (index arr i)) (i - 1)
-foldWithDescKey accum !ans0 (Full arr) = loop ans0 (n - 1)
-  where
-    n = isize arr
-    loop !ans i | i < 0 = ans
-    loop !ans i = loop (foldWithDescKey accum ans (index arr i)) (i - 1)
+    go !acc = \case
+      Empty -> acc
+      Leaf k v -> f k v acc
+      One _ x -> go acc x
+      Two _ x y -> go (go acc y) x
+      BitmapIndexed _ arr -> foldr (flip go) acc arr
+      Full arr -> foldr (flip go) acc arr
+{-# INLINE foldWithDescKey #-}
 
 -- ==================================================================
 -- Lookup a key

@@ -356,10 +356,13 @@ foldrWithKey' :: forall k v ans. (k -> v -> ans -> ans) -> ans -> SplitMap k v -
 foldrWithKey' comb ans0 (SplitMap imap) = IntMap.foldrWithKey' comb2 ans0 imap
   where
     comb2 :: Int -> KeyMap v -> ans -> ans
-    comb2 n kmap ans1 = KeyMap.foldWithDescKey comb3 ans1 kmap
+    comb2 n kmap !ans1 = KeyMap.foldWithDescKey comb3 ans1 kmap
       where
         comb3 :: Key -> v -> ans -> ans
-        comb3 key = comb (joinKey n key)
+        comb3 key v !ans2 = let k = joinKey n key in comb k v ans2
+        {-# INLINE comb3 #-}
+    {-# INLINE comb2 #-}
+{-# INLINE foldrWithKey' #-}
 
 -- =================================================================================
 -- These 'restrictKeys' functions assume the structure holding the 'good' keys is small
@@ -507,7 +510,9 @@ fromList = F.foldl' accum empty
 -- | Generates the list in ascending order of k
 toList :: SplitMap k v -> [(k, v)]
 toList = foldrWithKey' (\k v acc -> (k, v) : acc) []
-{-# NOINLINE [0] toList #-} -- needed for list fusion, see below
+{-# INLINE toList #-} -- needed for list fusion, see below
+
+-- {-# NOINLINE [0] toList #-} -- needed for list fusion, see below
 
 keys :: SplitMap k v -> [k]
 keys = foldrWithKey' (\k _ acc -> k : acc) []
@@ -533,9 +538,10 @@ foldrFB = foldrWithKey'
 "SplitMap.elemsBack" [1] foldrFB (\_ x xs -> x : xs) [] = elems
 "SplitMap.keys" [~1] forall m. keys m = Exts.build (\c n -> foldrFB (\k _ xs -> c k xs) n m)
 "SplitMap.keysBack" [1] foldrFB (\k _ xs -> k : xs) [] = keys
-"SplitMap.toList" [~1] forall m. toList m = Exts.build (\c n -> foldrFB (\k x xs -> c (k, x) xs) n m)
 "SplitMap.toListBack" [1] foldrFB (\k x xs -> (k, x) : xs) [] = toList
   #-}
+
+-- "SplitMap.toList" [~1] forall m. toList m = Exts.build (\c n -> foldrFB (\k x xs -> c (k, x) xs) n m)
 
 toMap :: Ord k => SplitMap k v -> Map.Map k v
 toMap = foldrWithKey' Map.insert mempty

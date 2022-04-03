@@ -108,6 +108,7 @@ benchmark performance
     criterion,
     compact-map,
     data-default-class,
+    deepseq,
     cardano-ledger-core,
     cardano-ledger-shelley,
     ledger-state,

@@ -1,6 +1,8 @@
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Main where
 
@@ -23,25 +25,32 @@ import Cardano.Ledger.TxIn
 import Cardano.Slotting.EpochInfo (fixedEpochInfo)
 import Cardano.Slotting.Slot
 import Cardano.Slotting.Time (mkSlotLength)
+import Control.DeepSeq
 import Criterion.Main
 import Data.Aeson
 import Data.Bifunctor (first)
 import Data.ByteString.Base16.Lazy as BSL16
 import Data.ByteString.Lazy (ByteString)
 import Data.Compact.HashMap (Keyed (..))
-import Data.Compact.SplitMapOriginal as SplitMap
+import qualified Data.Compact.SplitMapOriginal as SplitMap
 import Data.Default.Class (def)
 import Data.Foldable as F
+import Data.IntMap.Strict as IntMap
 import Data.Map.Strict as Map
 import Data.Set as Set
 import System.Environment (getEnv)
 
 -- This instance might be useful again if we can get SplitMap to perform well.
 instance CC.Crypto crypto => SplitMap.Split (TxIn crypto) where
-  splitKey (TxIn txId txIx) = (txIxToInt txIx, toKey txId)
+  splitKey (TxIn txId txIx) =
+    let i = txIxToInt txIx
+        k = toKey txId
+     in i `seq` k `seq` (i, k)
+  {-# INLINE splitKey #-}
   joinKey txIx key =
     -- `fromIntegral` is safe here, since we have only valid values in the SplitMap:
     TxIn (fromKey key) (TxIx (fromIntegral txIx))
+  {-# INLINE joinKey #-}
 
 main :: IO ()
 main = do
@@ -108,13 +117,59 @@ main = do
               ],
       bgroup
         "UTxO"
-        [ env (pure (utxo, utxosm)) $ \ ~(m, sm) ->
+        [ env (pure (utxo, utxosm, fromMapS utxo)) $ \ ~(m, sm, s) ->
             bgroup "toList" $
-              [ bench "Map" $ nf Map.toList m,
-                bench "SplitMap" $ nf SplitMap.toList sm
+              [ bench "Map" $ nf (Map.foldrWithKey' f ()) m,
+                bench "SplitMap" $ nf (SplitMap.foldrWithKey' f ()) sm,
+                bench "SMap" $ nf (foldrWithKeyS f ()) s
               ]
         ]
     ]
+  where
+    f _k v () = v `deepseq` ()
+
+type K = TxIn CC.StandardCrypto
+
+type V = TxOut CurrentEra
+
+newtype SplitMap = SplitMap (IntMap.IntMap (Map.Map (TxId CC.StandardCrypto) V))
+  deriving (NFData)
+
+insertS :: K -> V -> SplitMap -> SplitMap
+insertS (TxIn txId txIx) v (SplitMap imap) =
+  SplitMap (IntMap.insertWith Map.union ix (Map.singleton txId v) imap)
+  where
+    ix = txIxToInt txIx
+
+fromMapS :: Map.Map K V -> SplitMap
+fromMapS = Map.foldrWithKey' insertS (SplitMap mempty)
+
+toListS :: SplitMap -> [(K, V)]
+toListS = foldrWithKeyS (\k v acc -> (k, v) : acc) []
+{-# INLINE toListS #-} -- needed for list fusion, see below
+
+foldrWithKeyS :: (K -> V -> a -> a) -> a -> SplitMap -> a
+foldrWithKeyS f ans0 (SplitMap imap) =
+  IntMap.foldrWithKey'
+  (\ix kmap ans1 -> Map.foldrWithKey' (\key -> f (TxIn key (TxIx (fromIntegral ix)))) ans1 kmap)
+  ans0
+  imap
+{-# INLINE foldrWithKeyS #-}
+-- foldrWithKeyS comb ans0 (SplitMap imap) = IntMap.foldrWithKey' comb2 ans0 imap
+--   where
+--     comb2 ix kmap !ans1 = Map.foldrWithKey' comb3 ans1 kmap
+--       where
+--         comb3 key v !ans2 = let k = TxIn key (TxIx (fromIntegral ix)) in comb k v ans2
+--         {-# INLINE comb3 #-}
+--     {-# INLINE comb2 #-}
+-- {-# INLINE foldrWithKeyS #-}
+
+-- insertWithKey :: (TxIn StandardCrypto -> V -> V -> V) -> K -> V -> SplitMap -> SplitMap
+-- insertWithKey combine (TxIn txId txIx) v (SplitMap imap) =
+--   SplitMap (IntMap.insertWith combine2 n (Map.insert key v mempty) imap)
+--   where
+--     ix = txIxToInt txIx
+--     combine2 _km1 km2 = Map.insertWith (combine k) key v km2
 
 decodeTx :: ByteString -> Core.Tx CurrentEra
 decodeTx hex = either error id $ do

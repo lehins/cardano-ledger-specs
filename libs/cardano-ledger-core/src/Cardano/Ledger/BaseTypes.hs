@@ -659,7 +659,7 @@ newtype BlocksMade crypto = BlocksMade
   deriving newtype (NoThunks, NFData, ToJSON, FromJSON, ToCBOR, FromCBOR)
 
 -- | Transaction index. It is unfeasable to have 65535 outputs in a transaction,
--- but 255 is right on the border of a maximum CertIx on Mainnet at the moment,
+-- but 255 is right on the border of a maximum TxIx on Mainnet at the moment,
 -- that is why `Word16` was chosen as the smallest upper bound. Use
 -- `txIxFromIntegral` in order to construct this index safely from anything
 -- other than `Word16`. There is also `mkTxIxPartial` that can be used for
